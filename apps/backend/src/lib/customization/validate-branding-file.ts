@@ -1,3 +1,5 @@
+import { MAX_BRANDING_FILE_BYTES } from '@/lib/api/validate-request-size';
+
 export interface BrandingFileValidationResult {
     valid: boolean;
     error?: string;
@@ -6,17 +8,21 @@ export interface BrandingFileValidationResult {
 
 const ALLOWED_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/svg+xml', 'image/webp']);
 const ALLOWED_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.svg', '.webp']);
-const MAX_BYTES = 2 * 1024 * 1024; // 2 MB
 
 // Magic bytes for allowed binary formats (SVG is text, checked separately)
 const MAGIC: Array<{ mime: string; bytes: number[] }> = [
-    { mime: 'image/png',  bytes: [0x89, 0x50, 0x4e, 0x47] },
-    { mime: 'image/jpeg', bytes: [0xff, 0xd8, 0xff] },
-    { mime: 'image/webp', bytes: [0x52, 0x49, 0x46, 0x46] }, // RIFF header
+    { mime: 'image/png',  bytes: [0x89, 0x50, 0x4e, 0x47] }, // PNG signature, offsets 0-3
+    { mime: 'image/jpeg', bytes: [0xff, 0xd8, 0xff] },       // JPEG SOI + marker, offsets 0-2
+    { mime: 'image/webp', bytes: [0x52, 0x49, 0x46, 0x46] }, // "RIFF" container header, offsets 0-3
 ];
 
-function matchesMagic(buf: Uint8Array, magic: number[]): boolean {
-    return magic.every((b, i) => buf[i] === b);
+// WebP files are RIFF containers; the "WEBP" marker at offsets 8-11 distinguishes
+// them from other RIFF payloads (e.g. WAV, which has "WAVE" at offsets 8-11).
+const WEBP_MARKER = [0x57, 0x45, 0x42, 0x50]; // "WEBP"
+const WEBP_MARKER_OFFSET = 8;
+
+function matchesMagic(buf: Uint8Array, magic: number[], offset = 0): boolean {
+    return magic.every((b, i) => buf[offset + i] === b);
 }
 
 function isSvgContent(buf: Uint8Array): boolean {
@@ -55,7 +61,13 @@ export function validateBrandingFile(
     }
 
     // 2. Extension allowlist
-    const ext = ('.' + filename.split('.').pop()!.toLowerCase());
+    // Derive the extension from the last dot. A name with no dot (e.g. "png") or a
+    // leading-only dot (e.g. ".png") has no real extension and must be rejected.
+    const dotIndex = filename.lastIndexOf('.');
+    if (dotIndex <= 0) {
+        return { valid: false, error: 'File has no valid extension.', code: 'INVALID_EXTENSION' };
+    }
+    const ext = filename.slice(dotIndex).toLowerCase();
     if (!ALLOWED_EXTENSIONS.has(ext)) {
         return { valid: false, error: `File extension "${ext}" is not allowed.`, code: 'INVALID_EXTENSION' };
     }
@@ -72,9 +84,10 @@ export function validateBrandingFile(
         }
     }
 
-    // 4. Size limit
-    if (sizeBytes > MAX_BYTES) {
-        return { valid: false, error: `File exceeds the 2 MB size limit (${(sizeBytes / 1024 / 1024).toFixed(2)} MB).`, code: 'FILE_TOO_LARGE' };
+    // 4. Size limit (single source of truth shared with request-size validation)
+    if (sizeBytes > MAX_BRANDING_FILE_BYTES) {
+        const limitMb = (MAX_BRANDING_FILE_BYTES / 1024 / 1024).toFixed(0);
+        return { valid: false, error: `File exceeds the ${limitMb} MB size limit (${(sizeBytes / 1024 / 1024).toFixed(2)} MB).`, code: 'FILE_TOO_LARGE' };
     }
 
     // 5. Magic bytes / content safety
@@ -85,6 +98,11 @@ export function validateBrandingFile(
     } else {
         const match = MAGIC.find((m) => m.mime === mimeType);
         if (match && !matchesMagic(buffer, match.bytes)) {
+            return { valid: false, error: 'File content does not match the declared file type.', code: 'MAGIC_BYTES_MISMATCH' };
+        }
+        // WebP must also carry the "WEBP" marker at offsets 8-11, otherwise it is
+        // some other RIFF container (e.g. WAV) renamed to .webp.
+        if (mimeType === 'image/webp' && !matchesMagic(buffer, WEBP_MARKER, WEBP_MARKER_OFFSET)) {
             return { valid: false, error: 'File content does not match the declared file type.', code: 'MAGIC_BYTES_MISMATCH' };
         }
     }
