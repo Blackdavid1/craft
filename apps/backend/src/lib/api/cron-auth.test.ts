@@ -3,9 +3,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const SECRET = 'test-cron-secret-123';
 
-// CRON_SECRET is captured at module load, so re-import after setting the env.
+// CRON_SECRET is read lazily per request, so no module reload is required.
 async function loadWithSecret(secret: string | undefined) {
-    vi.resetModules();
     if (secret === undefined) vi.stubEnv('CRON_SECRET', '');
     else vi.stubEnv('CRON_SECRET', secret);
     return import('./cron-auth');
@@ -106,7 +105,23 @@ describe('withCronAuth', () => {
         expect(handler).not.toHaveBeenCalled();
     });
 
-    it('allows requests when CRON_SECRET is not configured', async () => {
+    it('rejects with 401 when CRON_SECRET is not configured in production', async () => {
+        vi.stubEnv('NODE_ENV', 'production');
+        const { withCronAuth } = await loadWithSecret(undefined);
+        const handler = makeHandler();
+
+        const res = await withCronAuth(handler)(makeRequest(), { params: {} });
+
+        expect(res.status).toBe(401);
+        expect(await res.json()).toEqual({
+            error: 'Unauthorized: invalid or missing cron signature',
+        });
+        expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('allows requests when CRON_SECRET is not configured outside production and warns once', async () => {
+        vi.stubEnv('NODE_ENV', 'development');
+        const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const { withCronAuth } = await loadWithSecret(undefined);
         const handler = makeHandler();
 
@@ -114,5 +129,19 @@ describe('withCronAuth', () => {
 
         expect(res.status).toBe(200);
         expect(handler).toHaveBeenCalledTimes(1);
+        expect(warn).toHaveBeenCalledTimes(1);
+    });
+
+    it('honours a rotated CRON_SECRET without a module reload', async () => {
+        const { validateCronSignature } = await loadWithSecret(SECRET);
+        const oldToken = SECRET;
+        const newToken = 'rotated-cron-secret-456';
+
+        expect(validateCronSignature(`Bearer ${oldToken}`)).toBe(true);
+
+        vi.stubEnv('CRON_SECRET', newToken);
+
+        expect(validateCronSignature(`Bearer ${oldToken}`)).toBe(false);
+        expect(validateCronSignature(`Bearer ${newToken}`)).toBe(true);
     });
 });
