@@ -36,7 +36,7 @@ type RouteHandler<TParams = {}> = (
  * ```typescript
  * export const POST = withRateLimit('deployments:create', DEPLOY_RATE_LIMIT)(
  *   withAuth(async (req, { user, params }) => {
- *     const trackedHandler = await withUsageTracking(
+ *     const trackedHandler = withUsageTracking(
  *       async (req, ctx) => {
  *         const deployment = await createDeployment(user.id, params);
  *         return NextResponse.json(deployment, { status: 201 });

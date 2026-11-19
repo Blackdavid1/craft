@@ -196,6 +196,93 @@ describe('CostEstimationService', () => {
         });
     });
 
+    describe('Resource Usage Input Normalization', () => {
+        const baseUsage: ResourceUsage = {
+            cpuCores: 1,
+            memoryGB: 2,
+            storageGB: 10,
+            bandwidthGB: 100,
+            durationHours: 720
+        };
+
+        const invalidValues = [NaN, Infinity, -Infinity, -1, -100];
+
+        const expectFiniteNonNegative = (result: ReturnType<typeof costEstimationService.calculateCost>) => {
+            const values = [
+                result.baseTierCost,
+                result.computeCost,
+                result.storageCost,
+                result.networkCost,
+                result.totalCost
+            ];
+            for (const value of values) {
+                expect(Number.isFinite(value)).toBe(true);
+                expect(value).toBeGreaterThanOrEqual(0);
+            }
+        };
+
+        const fields: Array<keyof ResourceUsage> = [
+            'cpuCores',
+            'memoryGB',
+            'storageGB',
+            'bandwidthGB',
+            'durationHours'
+        ];
+
+        for (const field of fields) {
+            for (const invalidValue of invalidValues) {
+                it(`should normalize ${String(invalidValue)} ${field} to zero`, () => {
+                    const usage: ResourceUsage = { ...baseUsage, [field]: invalidValue };
+                    const result = costEstimationService.calculateCost(usage, 'basic');
+
+                    expectFiniteNonNegative(result);
+                    expect(result.baseTierCost).toBe(10);
+                    expect(result.computeCost).toBe(0);
+                    expect(result.storageCost).toBe(0);
+                    expect(result.networkCost).toBe(0);
+                    expect(result.totalCost).toBe(10);
+                });
+            }
+        }
+
+        it('should normalize all invalid fields at once and fall back to base tier cost', () => {
+            const usage: ResourceUsage = {
+                cpuCores: NaN,
+                memoryGB: -5,
+                storageGB: Infinity,
+                bandwidthGB: -Infinity,
+                durationHours: NaN
+            };
+
+            const result = costEstimationService.calculateCost(usage, 'premium');
+
+            expectFiniteNonNegative(result);
+            expect(result.baseTierCost).toBe(50);
+            expect(result.computeCost).toBe(0);
+            expect(result.storageCost).toBe(0);
+            expect(result.networkCost).toBe(0);
+            expect(result.totalCost).toBe(50);
+        });
+
+        it('should normalize invalid fields while preserving valid overages', () => {
+            const usage: ResourceUsage = {
+                cpuCores: 2,        // valid overage: (2-1) * 0.01 * 100 = $1.00
+                memoryGB: NaN,      // normalized to 0
+                storageGB: -10,     // normalized to 0
+                bandwidthGB: 200,   // valid overage: (200-100) * 0.05 = $5.00
+                durationHours: 100
+            };
+
+            const result = costEstimationService.calculateCost(usage, 'basic');
+
+            expectFiniteNonNegative(result);
+            expect(result.computeCost).toBe(1.00);
+            expect(result.storageCost).toBe(0);
+            expect(result.networkCost).toBe(5.00);
+            expect(result.totalCost).toBe(16.00);
+        });
+    });
+
     describe('Cost Alert Thresholds', () => {
         it('should trigger alert when cost exceeds threshold', () => {
             const result = costEstimationService.checkAlert(120, 100);

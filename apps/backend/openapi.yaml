@@ -134,9 +134,22 @@ paths:
       parameters:
         - name: category
           in: query
+          description: >
+            Filter templates by category. Must be one of the accepted values
+            listed in the enum; any other value returns 400 with the list of
+            valid values.
           schema:
             type: string
-            enum: [dex, defi, payment, asset]
+            enum: [dex, lending, payment, asset-issuance]
+        - name: blockchainType
+          in: query
+          description: >
+            Filter templates by target blockchain. Must be one of the accepted
+            values listed in the enum; any other value returns 400 with the
+            list of valid values.
+          schema:
+            type: string
+            enum: [stellar]
         - name: search
           in: query
           schema:
@@ -169,6 +182,15 @@ paths:
                     type: integer
                   offset:
                     type: integer
+        '400':
+          description: >
+            Invalid filter value. Returned when `category` or `blockchainType`
+            is not one of the accepted enum values; the response body lists the
+            valid values.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /templates/{id}:
     get:
@@ -203,26 +225,29 @@ paths:
       security:
         - bearerAuth: []
       parameters:
-        - name: filter
-          in: query
-          required: false
-          schema:
-            type: string
-            enum: [pending, building, completed, failed]
-          description: >
-            Filter deployments by status. Must be one of the known deployment
-            statuses: `pending`, `building`, `completed`, or `failed`.
-            Any other value is rejected with a 400 error.
         - name: limit
           in: query
           required: false
+          description: >
+            Maximum number of deployments to return. Must be an integer greater
+            than or equal to 1. Defaults to 20 when omitted; values above the
+            maximum of 100 are capped at 100. Non-numeric, zero, or negative
+            values return HTTP 400.
           schema:
             type: integer
             minimum: 1
+            maximum: 100
+            default: 20
+        - name: direction
+          in: query
+          required: false
           description: >
-            Maximum number of deployments to return. Must be a positive
-            integer (digits only); non-numeric or malformed values are
-            rejected with a 400 error.
+            Pagination direction. Must be either `next` or `prev`. Defaults to
+            `next` when omitted. Any other value returns HTTP 400.
+          schema:
+            type: string
+            enum: [next, prev]
+            default: next
       responses:
         '200':
           description: List of deployments
@@ -233,9 +258,7 @@ paths:
                 items:
                   $ref: '#/components/schemas/Deployment'
         '400':
-          description: >
-            Invalid query parameters. Returned when `filter` is not a known
-            deployment status or `limit` is not a positive integer.
+          description: Invalid `limit` or `direction` query parameter.
           content:
             application/json:
               schema:
@@ -390,6 +413,48 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  /branding/upload:
+    post:
+      summary: Upload a branding asset
+      description: >
+        Validates the uploaded file (type and size). Storage is not yet wired,
+        so once validation succeeds the endpoint returns 501 Not Implemented
+        with code `STORAGE_NOT_CONFIGURED`. Validation failures continue to
+        return 400.
+      tags:
+        - Branding
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '400':
+          description: Invalid or missing file.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '501':
+          description: >
+            File validation succeeded but storage is not configured yet.
+            The response includes `code: STORAGE_NOT_CONFIGURED`.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+                  code:
+                    type: string
+                    enum: [STORAGE_NOT_CONFIGURED]
+
   /payments/checkout:
     post:
       summary: Create a Stripe checkout session
@@ -482,7 +547,10 @@ components:
           type: string
         category:
           type: string
-          enum: [dex, defi, payment, asset]
+          enum: [dex, lending, payment, asset-issuance]
+        blockchainType:
+          type: string
+          enum: [stellar]
         version:
           type: string
         features:
@@ -608,6 +676,8 @@ components:
             - INTERNAL_SERVER_ERROR
             - INTERNAL_DATABASE_ERROR
             - INTERNAL_CONFIGURATION_ERROR
+            # Not implemented
+            - STORAGE_NOT_CONFIGURED
         category:
           type: string
           description: Top-level error group for client-side branching.

@@ -37,6 +37,23 @@ export interface LogStreamBufferOptions {
 }
 
 const DEFAULT_CAPACITY = 100;
+const DEFAULT_START_SEQ = 0;
+
+/**
+ * Returns `value` when it is a non-negative integer, otherwise `fallback`.
+ * Rejects `NaN`, `Infinity`, fractional and negative values.
+ */
+function toNonNegativeInteger(value: number | undefined, fallback: number): number {
+    return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : fallback;
+}
+
+/**
+ * Normalizes a client-controlled sequence number (e.g. from `Last-Event-ID`).
+ * Non-finite values (`NaN`, `±Infinity`) are treated as 0.
+ */
+function normalizeSeq(value: number): number {
+    return Number.isFinite(value) ? value : 0;
+}
 
 export class LogStreamBuffer {
     private readonly capacity: number;
@@ -47,12 +64,26 @@ export class LogStreamBuffer {
     private droppedSinceFlush = 0;
     private totalDropped = 0;
 
+    /**
+     * @param options.capacity Max pending entries; must be a non-negative
+     *   integer. Invalid values (`NaN`, fractional, negative, non-finite) fall
+     *   back to {@link DEFAULT_CAPACITY} (100). A value of 0 is clamped to 1.
+     * @param options.startSeq Sequence number of the last event the client
+     *   already has; must be a non-negative integer. Invalid values fall back
+     *   to 0. Numbering resumes at `startSeq + 1`.
+     * @param options.historyLimit Max emitted events retained for replay; must
+     *   be a non-negative integer. Invalid values fall back to `capacity`.
+     */
     constructor(options: LogStreamBufferOptions = {}) {
-        this.capacity = Math.max(1, options.capacity ?? DEFAULT_CAPACITY);
-        this.historyLimit = Math.max(1, options.historyLimit ?? this.capacity);
+        this.capacity = Math.max(1, toNonNegativeInteger(options.capacity, DEFAULT_CAPACITY));
+        this.historyLimit = Math.max(
+            1,
+            toNonNegativeInteger(options.historyLimit, this.capacity),
+        );
         // First event after a reconnect continues numbering from the last seen id.
-        this.nextSeq = (options.startSeq ?? 0) + 1;
+        this.nextSeq = toNonNegativeInteger(options.startSeq, DEFAULT_START_SEQ) + 1;
     }
+=======
 
     /**
      * Enqueue a log line. Assigns the next sequence number and appends it to the
@@ -121,8 +152,10 @@ export class LogStreamBuffer {
      * prior state and start fresh.
      */
     replayFrom(lastSeq: number): LogStreamEvent[] {
-        return this.history.filter((e) => e.seq > lastSeq);
+        const from = normalizeSeq(lastSeq);
+        return this.history.filter((e) => e.seq > from);
     }
+=======
 
     /**
      * Returns `true` when the client's `lastSeq` is higher than any sequence
@@ -143,7 +176,7 @@ export class LogStreamBuffer {
      * ```
      */
     hasSequenceReset(lastSeq: number): boolean {
-        return lastSeq > this.lastSeq;
+        return normalizeSeq(lastSeq) > this.lastSeq;
     }
 
     /** Sequence of the oldest retained event, or null when history is empty. */
