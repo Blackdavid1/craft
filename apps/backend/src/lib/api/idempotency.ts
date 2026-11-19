@@ -57,10 +57,50 @@ import type { NextRequest } from 'next/server';
 
 export const IDEMPOTENCY_KEY_HEADER = 'idempotency-key';
 
+/** Maximum accepted length of an `Idempotency-Key` header value. */
+export const IDEMPOTENCY_KEY_MAX_LENGTH = 255;
+
+/** Matches 1-255 printable ASCII characters (0x20-0x7E). */
+const IDEMPOTENCY_KEY_PATTERN = /^[\x20-\x7E]{1,255}$/;
+
+/** Headers that must never be cached or replayed. */
+const UNSAFE_RESPONSE_HEADERS = new Set(['set-cookie', 'set-cookie2']);
+
 interface CachedResponse {
     status: number;
     body: unknown;
+    /** True when the stored body was plain text rather than JSON. */
+    isText: boolean;
+    /** Filtered copy of safe response headers. */
+    headers: Record<string, string>;
     storedAt: number;
+}
+
+/**
+ * Validate an `Idempotency-Key` header value.
+ * @returns An error message when invalid, or `null` when the key is acceptable.
+ */
+function validateIdempotencyKey(rawKey: string): string | null {
+    if (rawKey.length === 0) {
+        return `Invalid ${IDEMPOTENCY_KEY_HEADER} header: must be 1-${IDEMPOTENCY_KEY_MAX_LENGTH} printable ASCII characters.`;
+    }
+    if (rawKey.length > IDEMPOTENCY_KEY_MAX_LENGTH) {
+        return `Invalid ${IDEMPOTENCY_KEY_HEADER} header: must be at most ${IDEMPOTENCY_KEY_MAX_LENGTH} characters.`;
+    }
+    if (!IDEMPOTENCY_KEY_PATTERN.test(rawKey)) {
+        return `Invalid ${IDEMPOTENCY_KEY_HEADER} header: must contain only printable ASCII characters.`;
+    }
+    return null;
+}
+
+/** Collect a filtered copy of safe response headers for caching. */
+function safeHeaders(response: NextResponse): Record<string, string> {
+    const headers: Record<string, string> = {};
+    response.headers.forEach((value, name) => {
+        if (UNSAFE_RESPONSE_HEADERS.has(name.toLowerCase())) return;
+        headers[name] = value;
+    });
+    return headers;
 }
 
 // Module-level cache: survives across requests within a process.
@@ -166,15 +206,27 @@ export function withIdempotency(
         const rawKey = req.headers.get(IDEMPOTENCY_KEY_HEADER);
         if (!rawKey) return handler(req);
 
+        const keyError = validateIdempotencyKey(rawKey);
+        if (keyError) {
+            return NextResponse.json({ error: keyError }, { status: 400 });
+        }
+
         evictExpired();
 
         const key = cacheKey(userId, rawKey);
         const cached = cache.get(key);
 
         if (cached && Date.now() - cached.storedAt <= ttlMs()) {
+            const headers = { ...cached.headers, 'Idempotent-Replayed': 'true' };
+            if (cached.isText) {
+                return new NextResponse(String(cached.body), {
+                    status: cached.status,
+                    headers,
+                });
+            }
             return NextResponse.json(cached.body, {
                 status: cached.status,
-                headers: { 'Idempotent-Replayed': 'true' },
+                headers,
             });
         }
 

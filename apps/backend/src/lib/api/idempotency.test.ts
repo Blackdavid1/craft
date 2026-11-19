@@ -225,9 +225,7 @@ describe('withIdempotency — non-JSON response bodies', () => {
         return vi.fn().mockResolvedValue(new NextResponse(body, { status }));
     }
 
-    it('caches and replays a 2xx response with plain text body as null', async () => {
-        // Line 82: response.clone().json().catch(() => null)
-        // When a 2xx response has a non-JSON body, it is silently cached as null.
+    it('replays a plain text body faithfully instead of null', async () => {
         const handler = makePlainTextHandler(200, 'ok');
         const wrapped = withIdempotency('user_a', handler);
 
@@ -238,16 +236,15 @@ describe('withIdempotency — non-JSON response bodies', () => {
         expect(handler).toHaveBeenCalledTimes(1);
         expect(r2.headers.get('Idempotent-Replayed')).toBe('true');
 
-        // First response's actual body
         const body1 = await r1.text();
         expect(body1).toBe('ok');
 
-        // Replayed response body is null (as JSON)
-        const body2 = await r2.json();
-        expect(body2).toBeNull();
+        // Replayed response preserves the original plain-text body
+        const body2 = await r2.text();
+        expect(body2).toBe('ok');
     });
 
-    it('caches and replays a 2xx response with empty body as null', async () => {
+    it('replays an empty body as an empty body', async () => {
         const handler = makePlainTextHandler(200, '');
         const wrapped = withIdempotency('user_a', handler);
 
@@ -260,12 +257,11 @@ describe('withIdempotency — non-JSON response bodies', () => {
         const body1Text = await r1.text();
         expect(body1Text).toBe('');
 
-        const body2 = await r2.json();
-        expect(body2).toBeNull();
+        const body2Text = await r2.text();
+        expect(body2Text).toBe('');
     });
 
-    it('correctly distinguishes between an empty body and a valid JSON null payload', async () => {
-        // Both collapse to cached null today, but this test documents the boundary.
+    it('distinguishes between an empty body and a valid JSON null payload', async () => {
         const handlerEmpty = makePlainTextHandler(200, '');
         const handlerJsonNull = makeHandler(200, null);
 
@@ -275,7 +271,6 @@ describe('withIdempotency — non-JSON response bodies', () => {
         const r1Empty = await wrappedEmpty(makeRequest('key-empty'));
         const r1JsonNull = await wrappedJsonNull(makeRequest('key-json-null'));
 
-        // First responses differ, but replayss are both null
         const bodyEmptyFirst = await r1Empty.text();
         expect(bodyEmptyFirst).toBe('');
 
@@ -286,14 +281,15 @@ describe('withIdempotency — non-JSON response bodies', () => {
         const rEmpty = await wrappedEmpty(makeRequest('key-empty'));
         const rJsonNull = await wrappedJsonNull(makeRequest('key-json-null'));
 
-        // Replay bodies are both null
-        const replayEmpty = await rEmpty.json();
+        // Empty body stays empty; JSON null stays JSON null
+        const replayEmpty = await rEmpty.text();
+        expect(replayEmpty).toBe('');
+
         const replayJsonNull = await rJsonNull.json();
-        expect(replayEmpty).toBeNull();
         expect(replayJsonNull).toBeNull();
     });
 
-    it('handles 2xx responses with invalid JSON body and replays them as null', async () => {
+    it('replays an invalid JSON body verbatim', async () => {
         const handler = makePlainTextHandler(200, '{ invalid json }');
         const wrapped = withIdempotency('user_a', handler);
 
@@ -306,8 +302,107 @@ describe('withIdempotency — non-JSON response bodies', () => {
         const body1 = await r1.text();
         expect(body1).toBe('{ invalid json }');
 
+        const body2 = await r2.text();
+        expect(body2).toBe('{ invalid json }');
+    });
+});
+
+// ── Header preservation on replay (#1382) ─────────────────────────────────────
+
+describe('withIdempotency — header preservation on replay (#1382)', () => {
+    it('re-applies a custom header (Location) on the replayed response', async () => {
+        const handler = vi.fn().mockResolvedValue(
+            NextResponse.json(
+                { id: 'dep_1' },
+                {
+                    status: 201,
+                    headers: { Location: '/api/deployments/dep_1' },
+                },
+            ),
+        );
+        const wrapped = withIdempotency('user_a', handler);
+
+        const r1 = await wrapped(makeRequest('key-location'));
+        expect(r1.headers.get('Location')).toBe('/api/deployments/dep_1');
+
+        const r2 = await wrapped(makeRequest('key-location'));
+
+        expect(handler).toHaveBeenCalledTimes(1);
+        expect(r2.status).toBe(201);
+        expect(r2.headers.get('Location')).toBe('/api/deployments/dep_1');
+        expect(r2.headers.get('Idempotent-Replayed')).toBe('true');
+
         const body2 = await r2.json();
-        expect(body2).toBeNull();
+        expect(body2).toEqual({ id: 'dep_1' });
+    });
+
+    it('does not cache or replay Set-Cookie headers', async () => {
+        const handler = vi.fn().mockResolvedValue(
+            NextResponse.json(
+                { id: 'dep_1' },
+                {
+                    status: 201,
+                    headers: {
+                        'Set-Cookie': 'session=secret; HttpOnly',
+                        'X-Custom': 'kept',
+                    },
+                },
+            ),
+        );
+        const wrapped = withIdempotency('user_a', handler);
+
+        const r1 = await wrapped(makeRequest('key-cookie'));
+        expect(r1.headers.get('Set-Cookie')).toContain('session=secret');
+
+        const r2 = await wrapped(makeRequest('key-cookie'));
+
+        expect(handler).toHaveBeenCalledTimes(1);
+        expect(r2.headers.get('Idempotent-Replayed')).toBe('true');
+        expect(r2.headers.get('Set-Cookie')).toBeNull();
+        expect(r2.headers.get('X-Custom')).toBe('kept');
+    });
+});
+
+// ── Idempotency-Key validation (#1383) ────────────────────────────────────────
+
+describe('withIdempotency — Idempotency-Key validation (#1383)', () => {
+    it('rejects a 10 KB Idempotency-Key with a 400 naming the header', async () => {
+        const handler = makeHandler(201, { id: 'dep_1' });
+        const wrapped = withIdempotency('user_a', handler);
+
+        const hugeKey = 'a'.repeat(10 * 1024);
+        const res = await wrapped(makeRequest(hugeKey));
+
+        expect(res.status).toBe(400);
+        expect(handler).not.toHaveBeenCalled();
+
+        const body = await res.json();
+        expect(String(body.error ?? '')).toContain(IDEMPOTENCY_KEY_HEADER);
+    });
+
+    it('rejects a key containing control characters with a 400 naming the header', async () => {
+        const handler = makeHandler(201, { id: 'dep_1' });
+        const wrapped = withIdempotency('user_a', handler);
+
+        const res = await wrapped(makeRequest('key-\u0000-\u001f'));
+
+        expect(res.status).toBe(400);
+        expect(handler).not.toHaveBeenCalled();
+
+        const body = await res.json();
+        expect(String(body.error ?? '')).toContain(IDEMPOTENCY_KEY_HEADER);
+    });
+
+    it('still accepts a normal key', async () => {
+        const handler = makeHandler(201, { id: 'dep_1' });
+        const wrapped = withIdempotency('user_a', handler);
+
+        const r1 = await wrapped(makeRequest('normal-key-123'));
+        const r2 = await wrapped(makeRequest('normal-key-123'));
+
+        expect(r1.status).toBe(201);
+        expect(handler).toHaveBeenCalledTimes(1);
+        expect(r2.headers.get('Idempotent-Replayed')).toBe('true');
     });
 });
 
