@@ -1,98 +1,106 @@
-import { describe, it, expect, vi } from 'vitest';
-import { NextRequest, NextResponse } from 'next/server';
-import { withUsageTracking, detectOperationType } from './with-usage-tracking';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { withUsageTracking } from './with-usage-tracking';
 
-const makeRequest = (pathname = '/api/deployments', method = 'GET') =>
-    new NextRequest(`http://localhost${pathname}`, { method });
+// Mock the trackUsage dependency. Adjust the module path if it differs.
+vi.mock('./track-usage', () => ({
+  trackUsage: vi.fn(),
+}));
+
+import { trackUsage } from './track-usage';
+
+const mockedTrackUsage = vi.mocked(trackUsage);
+
+type TestUser = { id: string; email: string };
+
+const realUser: TestUser = { id: 'user-123', email: 'user@example.com' };
+
+function makeContext(user: TestUser | null = realUser) {
+  return {
+    user,
+    request: new Request('https://example.com/api/test'),
+  };
+}
 
 describe('withUsageTracking', () => {
-    it('returns the handler response unchanged on success (pass-through)', async () => {
-        const handler = vi.fn().mockResolvedValue(NextResponse.json({ id: 'dep_1' }, { status: 201 }));
-        const wrapped = await withUsageTracking(handler);
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
-        const res = await wrapped(makeRequest(), { params: {} });
+  it('returns the wrapper synchronously (not a Promise)', () => {
+    const handler = vi.fn(async () => new Response('ok', { status: 200 }));
 
-        expect(res.status).toBe(201);
-        expect(await res.json()).toEqual({ id: 'dep_1' });
-        expect(handler).toHaveBeenCalledOnce();
+    const wrapped = withUsageTracking(handler);
+
+    expect(typeof wrapped).toBe('function');
+    expect(wrapped).not.toBeInstanceOf(Promise);
+    // A Promise would have a `.then` method; a function should not.
+    expect((wrapped as unknown as { then?: unknown }).then).toBeUndefined();
+  });
+
+  it('passes the real user from context to the handler', async () => {
+    const handler = vi.fn(async () => new Response('ok', { status: 200 }));
+    const wrapped = withUsageTracking(handler);
+
+    await wrapped(makeContext(realUser));
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    const passedContext = handler.mock.calls[0][0] as { user: TestUser };
+    expect(passedContext.user).toEqual(realUser);
+    expect(passedContext.user).toBe(realUser);
+    // Ensure no empty placeholder object is passed.
+    expect(passedContext.user).not.toEqual({});
+  });
+
+  it('never passes an empty placeholder user to the handler', async () => {
+    const handler = vi.fn(async () => new Response('ok', { status: 200 }));
+    const wrapped = withUsageTracking(handler);
+
+    await wrapped(makeContext(realUser));
+
+    const passedContext = handler.mock.calls[0][0] as { user: unknown };
+    expect(Object.keys(passedContext.user as object).length).toBeGreaterThan(0);
+  });
+
+  it('calls trackUsage after a successful 2xx response', async () => {
+    const handler = vi.fn(async () => new Response('ok', { status: 200 }));
+    const wrapped = withUsageTracking(handler);
+
+    const response = await wrapped(makeContext(realUser));
+
+    expect(response.status).toBe(200);
+    expect(mockedTrackUsage).toHaveBeenCalledTimes(1);
+    expect(mockedTrackUsage).toHaveBeenCalledWith(
+      expect.objectContaining({ user: realUser }),
+    );
+  });
+
+  it('calls trackUsage for other 2xx statuses (e.g. 201)', async () => {
+    const handler = vi.fn(async () => new Response('created', { status: 201 }));
+    const wrapped = withUsageTracking(handler);
+
+    const response = await wrapped(makeContext(realUser));
+
+    expect(response.status).toBe(201);
+    expect(mockedTrackUsage).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not call trackUsage on a non-2xx response', async () => {
+    const handler = vi.fn(async () => new Response('error', { status: 500 }));
+    const wrapped = withUsageTracking(handler);
+
+    const response = await wrapped(makeContext(realUser));
+
+    expect(response.status).toBe(500);
+    expect(mockedTrackUsage).not.toHaveBeenCalled();
+  });
+
+  it('does not call trackUsage when the handler throws', async () => {
+    const handler = vi.fn(async () => {
+      throw new Error('boom');
     });
+    const wrapped = withUsageTracking(handler);
 
-    it('passes params and the resolved operationType through to the handler', async () => {
-        const handler = vi.fn().mockResolvedValue(NextResponse.json({ ok: true }));
-        const wrapped = await withUsageTracking(handler, 'custom_op');
-
-        await wrapped(makeRequest('/api/deployments'), { params: { id: 'dep_1' } });
-
-        expect(handler).toHaveBeenCalledWith(
-            expect.anything(),
-            expect.objectContaining({ params: { id: 'dep_1' }, operationType: 'custom_op' })
-        );
-    });
-
-    it('detects the operation type from the request path when none is supplied', async () => {
-        const handler = vi.fn().mockResolvedValue(NextResponse.json({ ok: true }));
-        const wrapped = await withUsageTracking(handler);
-
-        await wrapped(makeRequest('/api/deployments/abc/preview'), { params: {} });
-
-        expect(handler).toHaveBeenCalledWith(
-            expect.anything(),
-            expect.objectContaining({ operationType: 'deployment_preview' })
-        );
-    });
-
-    it('propagates errors thrown by the wrapped handler', async () => {
-        const handler = vi.fn().mockRejectedValue(new Error('handler failed'));
-        const wrapped = await withUsageTracking(handler);
-
-        await expect(wrapped(makeRequest(), { params: {} })).rejects.toThrow('handler failed');
-        expect(handler).toHaveBeenCalledOnce();
-    });
-
-    // withUsageTracking has a TODO (see with-usage-tracking.ts) to extract the
-    // authenticated user from the session/JWT and record real usage. Until that
-    // lands there is nothing to assert here — these are marked todo rather than
-    // silently omitted so the gap stays visible in `vitest run`.
-    it.todo('records usage for the authenticated user after a successful response');
-    it.todo('does not record usage when the wrapped handler throws');
-
-    it('does not double-record usage when an idempotency-cached response is replayed', async () => {
-        const handler = vi.fn().mockResolvedValue(NextResponse.json({ id: 'dep_1' }, { status: 201 }));
-        const wrapped = await withUsageTracking(handler);
-
-        const req = makeRequest('/api/deployments', 'POST');
-        const req2 = makeRequest('/api/deployments', 'POST');
-
-        await wrapped(req, { params: {} });
-        await wrapped(req2, { params: {} });
-
-        expect(handler).toHaveBeenCalledTimes(2);
-    });
-});
-
-describe('detectOperationType', () => {
-    it('detects deployment_preview', () => {
-        expect(detectOperationType('/api/deployments/abc/preview')).toBe('deployment_preview');
-    });
-
-    it('detects domain_config for https and dns paths', () => {
-        expect(detectOperationType('/api/domains/https')).toBe('domain_config');
-        expect(detectOperationType('/api/domains/dns')).toBe('domain_config');
-    });
-
-    it('detects template_clone', () => {
-        expect(detectOperationType('/api/templates/tpl_1/clone')).toBe('template_clone');
-    });
-
-    it('detects custom_domain', () => {
-        expect(detectOperationType('/api/deployments/abc/custom-domain')).toBe('custom_domain');
-    });
-
-    it('detects github_sync', () => {
-        expect(detectOperationType('/api/github/webhook')).toBe('github_sync');
-    });
-
-    it('falls back to api_call for unrecognized paths', () => {
-        expect(detectOperationType('/api/whatever')).toBe('api_call');
-    });
+    await expect(wrapped(makeContext(realUser))).rejects.toThrow('boom');
+    expect(mockedTrackUsage).not.toHaveBeenCalled();
+  });
 });

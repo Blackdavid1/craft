@@ -32,8 +32,28 @@ export type RetentionWindows = {
     tombstonedDeploymentPurgeDays: number;
 };
 
-export function normalizeRetentionDays(days: number | undefined, fallback: number): number {
-    if (typeof days !== 'number' || Number.isNaN(days) || !Number.isFinite(days)) {
+/**
+ * Normalizes a retention window in days.
+ *
+ * The minimum accepted retention window is 1 day. Any value that is not a
+ * finite number, or that is less than 1 (including 0 and negative values),
+ * is rejected and the fallback is returned instead. This prevents a bad env
+ * value from turning the purge cutoff into "now" or a future date, which
+ * could cause accidental mass deletion.
+ *
+ * When `envVar` is provided, a warning naming it is logged on rejection.
+ */
+export function normalizeRetentionDays(
+    days: number | undefined,
+    fallback: number,
+    envVar?: string
+): number {
+    if (typeof days !== 'number' || Number.isNaN(days) || !Number.isFinite(days) || days < 1) {
+        if (envVar !== undefined) {
+            console.warn(
+                `[retention-policy] Invalid value for ${envVar} (${String(days)}); retention windows must be at least 1 day. Falling back to ${fallback} days.`
+            );
+        }
         return fallback;
     }
     return days;
@@ -43,7 +63,7 @@ export function readRetentionDays(job: RetentionJob, env: NodeJS.ProcessEnv = pr
     const config = RETENTION_POLICY[job];
     const rawValue = env[config.envVar];
     const parsed = rawValue === undefined ? config.defaultDays : Number.parseInt(rawValue, 10);
-    return normalizeRetentionDays(parsed, config.defaultDays);
+    return normalizeRetentionDays(parsed, config.defaultDays, config.envVar);
 }
 
 export function getRetentionPolicyWindows(env: NodeJS.ProcessEnv = process.env): RetentionWindows {

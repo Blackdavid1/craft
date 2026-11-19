@@ -289,6 +289,30 @@ describe('POST /api/deployments/[id]/restore', () => {
             expect(res.status).toBe(410);
         });
 
+        it('refuses restores outside the default window when the env var is non-numeric', async () => {
+            process.env.DEPLOYMENT_TOMBSTONE_RETENTION_DAYS = 'abc';
+            const now = new Date();
+            const deletedAt = new Date(now.getTime() - 400 * 24 * 60 * 60 * 1000);
+
+            mockFrom.mockReturnValue({
+                select: vi.fn().mockReturnValue({
+                    eq: vi.fn().mockReturnValue({
+                        not: vi.fn().mockReturnValue({
+                            single: vi.fn().mockResolvedValue({
+                                data: { user_id: fakeUser.id, deleted_at: deletedAt.toISOString() },
+                                error: null,
+                            }),
+                        }),
+                    }),
+                }),
+            });
+
+            const { POST } = await import('./route');
+            const res = await POST(makeRequest(), { params });
+            expect(res.status).toBe(410);
+            expect((await res.json()).error).toContain('outside the restore retention window');
+        });
+
         it('includes correlationId in 410 response', async () => {
             const now = new Date();
             const deletedAt = new Date(now.getTime() - 35 * 24 * 60 * 60 * 1000);
