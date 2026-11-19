@@ -46,8 +46,10 @@ const RESERVED_DOMAINS = new Set([
  * 5. Each label must match RFC 1035 (1–63 chars, alphanumeric + hyphens)
  * 6. Must have at least two labels (i.e. a TLD is required)
  * 7. TLD must not be a reserved/special-use TLD (RFC 2606 / RFC 6761)
- * 8. Full domain must not be a reserved domain
- * 9. Must not be a localhost pattern (127.x.x.x, ::1, *.localhost)
+ * 8. TLD must not be all digits (rejects IP literals and numeric TLDs)
+ * 9. Full domain must not be a reserved domain, nor a subdomain of one
+ *    (e.g. "www.example.com" is reserved because "example.com" is)
+ * 10. Must not be a localhost pattern (127.x.x.x, ::1, *.localhost)
  *
  * @param input - Raw domain string from user input
  * @param field - Field name to include in error (default: "customDomain")
@@ -172,13 +174,26 @@ export function validateCustomDomain(
         };
     }
 
-    if (RESERVED_DOMAINS.has(domain)) {
+    // Reject IP literals and numeric TLDs (e.g. "10.0.0.1", "123.456")
+    if (/^\d+$/.test(tld)) {
         return {
             valid: false,
             field,
-            message: `"${domain}" is a reserved domain and cannot be used as a custom domain.`,
-            code: 'DOMAIN_RESERVED',
+            message: 'IP addresses and numeric TLDs cannot be used as custom domains.',
+            code: 'DOMAIN_INVALID_FORMAT',
         };
+    }
+
+    // Reject reserved domains and any subdomain of a reserved domain
+    for (const reserved of RESERVED_DOMAINS) {
+        if (domain === reserved || domain.endsWith('.' + reserved)) {
+            return {
+                valid: false,
+                field,
+                message: `"${domain}" is a reserved domain and cannot be used as a custom domain.`,
+                code: 'DOMAIN_RESERVED',
+            };
+        }
     }
 
     return { valid: true, domain };
