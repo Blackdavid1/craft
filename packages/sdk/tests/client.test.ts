@@ -133,6 +133,19 @@ describe('CraftClient initialization', () => {
     vi.unstubAllGlobals();
   });
 
+  it('strips every trailing slash from baseUrl', () => {
+    const client = new CraftClient({ baseUrl: `${BASE_URL}///` });
+    const fetch = mockFetch(AUTH_RESPONSE);
+    vi.stubGlobal('fetch', fetch);
+    client.signIn({ email: 'a@b.com', password: 'pw' });
+    expect(fetch.mock.calls[0][0]).toBe(`${BASE_URL}/api/auth/signin`);
+    vi.unstubAllGlobals();
+  });
+
+  it('rejects a baseUrl that is empty after trimming trailing slashes', () => {
+    expect(() => new CraftClient({ baseUrl: '///' })).toThrow('baseUrl is required');
+  });
+
   it('accepts an initial accessToken', () => {
     const client = new CraftClient({ baseUrl: BASE_URL, accessToken: 'tok_init' });
     const fetch = mockFetch(USER_PROFILE);

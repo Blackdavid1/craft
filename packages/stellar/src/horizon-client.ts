@@ -104,7 +104,9 @@ export class HorizonClient {
   readonly circuit: CircuitBreaker;
 
   constructor(options: HorizonClientOptions) {
-    this.baseUrl = options.baseUrl.replace(/\/$/, '');
+    const baseUrl = options.baseUrl?.replace(/\/+$/, '');
+    if (!baseUrl) throw new Error('baseUrl is required');
+    this.baseUrl = baseUrl;
     this.maxRetries = options.maxRetries ?? 3;
     this.onRetry = options.onRetry;
     this._fetch = options._fetch ?? globalThis.fetch;

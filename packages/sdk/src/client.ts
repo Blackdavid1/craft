@@ -169,8 +169,9 @@ export class CraftClient {
    * @throws Error if baseUrl is not provided
    */
   constructor(options: CraftClientOptions) {
-    if (!options.baseUrl) throw new Error('baseUrl is required');
-    this.baseUrl = options.baseUrl.replace(/\/$/, '');
+    const baseUrl = options.baseUrl?.replace(/\/+$/, '');
+    if (!baseUrl) throw new Error('baseUrl is required');
+    this.baseUrl = baseUrl;
     this.accessToken = options.accessToken;
     this.maxRetries = Math.max(0, options.maxRetries ?? DEFAULT_MAX_RETRIES);
     this.maxRetryDelayMs = options.maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS;
