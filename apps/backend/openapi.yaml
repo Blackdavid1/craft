@@ -202,6 +202,27 @@ paths:
         - Deployments
       security:
         - bearerAuth: []
+      parameters:
+        - name: filter
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, building, completed, failed]
+          description: >
+            Filter deployments by status. Must be one of the known deployment
+            statuses: `pending`, `building`, `completed`, or `failed`.
+            Any other value is rejected with a 400 error.
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+          description: >
+            Maximum number of deployments to return. Must be a positive
+            integer (digits only); non-numeric or malformed values are
+            rejected with a 400 error.
       responses:
         '200':
           description: List of deployments
@@ -211,6 +232,14 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Deployment'
+        '400':
+          description: >
+            Invalid query parameters. Returned when `filter` is not a known
+            deployment status or `limit` is not a positive integer.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
           content:

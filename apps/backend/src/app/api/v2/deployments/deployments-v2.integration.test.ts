@@ -215,6 +215,22 @@ describe('GET /api/v2/deployments — internal-format response (integration)', (
         expect(body.error).toMatch(/Invalid filter/);
     });
 
+    it('rejects an unknown status filter (filter=bogus) with a descriptive 400', async () => {
+        const { builder } = makeDeploymentsTable({ data: [], error: null });
+        mockFrom.mockImplementation(() => builder);
+
+        const { GET } = await import('./route');
+        const res = await GET(getRequest('filter=bogus'), { params: {} as never });
+
+        expect(res.status).toBe(400);
+        const body = await res.json();
+        expect(body.error).toMatch(/Invalid filter/);
+        expect(body.error).toContain('bogus');
+        // The query must never reach Supabase with an unknown status value.
+        expect(builder.eq).not.toHaveBeenCalled();
+        expect(builder.limit).not.toHaveBeenCalled();
+    });
+
     it('rejects an invalid sort with 400', async () => {
         const { GET } = await import('./route');
         const res = await GET(getRequest('sort=bogus_field'), { params: {} as never });
@@ -231,6 +247,19 @@ describe('GET /api/v2/deployments — internal-format response (integration)', (
         expect(res.status).toBe(400);
         const body = await res.json();
         expect(body.error).toMatch(/Invalid limit/);
+    });
+
+    it('rejects a partially numeric limit (limit=5abc) with 400', async () => {
+        const { builder } = makeDeploymentsTable({ data: [], error: null });
+        mockFrom.mockImplementation(() => builder);
+
+        const { GET } = await import('./route');
+        const res = await GET(getRequest('limit=5abc'), { params: {} as never });
+
+        expect(res.status).toBe(400);
+        const body = await res.json();
+        expect(body.error).toMatch(/Invalid limit/);
+        expect(builder.limit).not.toHaveBeenCalled();
     });
 
     it('caps an oversized limit at 100', async () => {
