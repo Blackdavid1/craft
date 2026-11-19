@@ -9,7 +9,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { getNetworkConfig, NETWORK_PASSPHRASES, HORIZON_URLS, SOROBAN_RPC_URLS } from './config';
+import {
+    getNetworkConfig,
+    resolveStellarNetworkConfig,
+    NETWORK_PASSPHRASES,
+    HORIZON_URLS,
+    SOROBAN_RPC_URLS,
+} from './config';
 
 describe('Stellar Config — Snapshot Regression Tests (#540)', () => {
     describe('getNetworkConfig — testnet', () => {
@@ -256,6 +262,69 @@ describe('Stellar Config — Snapshot Regression Tests (#540)', () => {
             expect(config.network).toBe('testnet');
             expect(console.warn).toHaveBeenCalled();
         });
+    });
+
+    describe('resolveStellarNetworkConfig — parity with resolveNetwork (#1415)', () => {
+        beforeEach(() => {
+            delete process.env.STELLAR_NETWORK;
+            delete process.env.NEXT_PUBLIC_STELLAR_NETWORK;
+            vi.spyOn(console, 'warn').mockImplementation(() => {});
+        });
+
+        afterEach(() => {
+            vi.restoreAllMocks();
+        });
+
+        it('should resolve mainnet for padded " mainnet "', () => {
+            process.env.STELLAR_NETWORK = ' mainnet ';
+            const config = resolveStellarNetworkConfig();
+            expect(config.network).toBe('mainnet');
+            expect(config.networkPassphrase).toBe(NETWORK_PASSPHRASES.mainnet);
+            expect(console.warn).not.toHaveBeenCalled();
+        });
+
+        it('should warn and default to testnet for capitalised "MAINNET"', () => {
+            process.env.STELLAR_NETWORK = 'MAINNET';
+            const config = resolveStellarNetworkConfig();
+            expect(config.network).toBe('testnet');
+            expect(console.warn).toHaveBeenCalledWith(
+                expect.stringContaining('Unrecognized STELLAR_NETWORK value')
+            );
+        });
+
+        it('should warn and default to testnet for unknown values', () => {
+            process.env.STELLAR_NETWORK = 'production';
+            const config = resolveStellarNetworkConfig();
+            expect(config.network).toBe('testnet');
+            expect(console.warn).toHaveBeenCalledWith(
+                expect.stringContaining('Unrecognized STELLAR_NETWORK value')
+            );
+        });
+
+        it('should silently default to testnet when STELLAR_NETWORK is unset', () => {
+            const config = resolveStellarNetworkConfig();
+            expect(config.network).toBe('testnet');
+            expect(console.warn).not.toHaveBeenCalled();
+        });
+
+        it.each(['mainnet', 'testnet', ' mainnet ', '  testnet  ', 'MAINNET', 'Testnet', 'production', ''])(
+            'should resolve %j consistently with getNetworkConfig()',
+            (raw) => {
+                if (raw === '') {
+                    delete process.env.STELLAR_NETWORK;
+                } else {
+                    process.env.STELLAR_NETWORK = raw;
+                }
+
+                const fromResolver = resolveStellarNetworkConfig();
+                const fromGetter = getNetworkConfig();
+
+                expect(fromResolver.network).toBe(fromGetter.network);
+                expect(fromResolver.horizonUrl).toBe(fromGetter.horizonUrl);
+                expect(fromResolver.networkPassphrase).toBe(fromGetter.networkPassphrase);
+                expect(fromResolver.sorobanRpcUrl).toBe(fromGetter.sorobanRpcUrl);
+            }
+        );
     });
 });
 
