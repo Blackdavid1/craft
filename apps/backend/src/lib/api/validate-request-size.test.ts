@@ -5,6 +5,7 @@ import {
     validateContentLength,
     DEFAULT_MAX_REQUEST_SIZE,
     DEFAULT_MAX_BRANDING_FILE_SIZE,
+    MAX_BRANDING_FILE_BYTES,
 } from './validate-request-size';
 
 describe('validate-request-size', () => {
@@ -55,6 +56,44 @@ describe('validate-request-size', () => {
             const result = formatBytes(5 * 1024 * 1024);
             expect(result).toContain('MB');
             expect(parseFloat(result)).toBe(5);
+        });
+
+        it('should format sub-byte values as bytes without undefined units', () => {
+            const result = formatBytes(0.5);
+            expect(result).toContain('bytes');
+            expect(result).not.toContain('undefined');
+        });
+
+        it('should return 0 bytes for negative input', () => {
+            expect(formatBytes(-1)).toBe('0 bytes');
+        });
+
+        it('should return 0 bytes for NaN input', () => {
+            expect(formatBytes(NaN)).toBe('0 bytes');
+        });
+
+        it('should format terabyte-scale values with a TB unit', () => {
+            const result = formatBytes(1024 ** 4);
+            expect(result).toContain('TB');
+            expect(result).not.toContain('undefined');
+            expect(parseFloat(result)).toBe(1);
+        });
+    });
+
+    describe('branding file size limit', () => {
+        it('should expose a single branding file size limit', () => {
+            expect(DEFAULT_MAX_BRANDING_FILE_SIZE).toBe(MAX_BRANDING_FILE_BYTES);
+        });
+
+        it('should reject a 3 MB branding file consistently', () => {
+            const threeMb = 3 * 1024 * 1024;
+            expect(threeMb).toBeGreaterThan(MAX_BRANDING_FILE_BYTES);
+
+            const result = validateContentLength(String(threeMb), MAX_BRANDING_FILE_BYTES);
+            expect(result.valid).toBe(false);
+            if (!result.valid) {
+                expect(result.message).toContain('exceeds maximum');
+            }
         });
     });
 

@@ -9,17 +9,16 @@
  * Cache entries are scoped per authenticated user — keys from different users
  * never collide even if the raw key string is identical.
  *
- * Key format:
- *   The `Idempotency-Key` header must be 1-255 printable ASCII characters
- *   (0x20-0x7E). Keys that are empty, longer than 255 characters, or contain
- *   control/non-printable characters are rejected with a 400 response.
- *
- * Replay fidelity:
- *   Cached entries store the response status, a filtered copy of safe response
- *   headers, and the body. On replay the stored headers are re-applied (with
- *   `Idempotent-Replayed: true`). Unsafe headers such as `Set-Cookie` are never
- *   cached. Bodies that are not valid JSON are stored as text and replayed as
- *   text rather than being coerced to `null`.
+ * In-flight deduplication:
+ *   The cache is only populated after a handler finishes, so two simultaneous
+ *   requests carrying the same key would otherwise both execute the handler
+ *   (e.g. creating two checkouts). To prevent this, the first request to miss
+ *   the cache registers its handler promise in an in-flight map keyed by the
+ *   same (userId, key) pair. Any duplicate request that arrives while that
+ *   promise is pending awaits it and returns a cloned response instead of
+ *   invoking the handler again. The in-flight entry is removed in a `finally`
+ *   block once the handler settles, at which point the cached response (if
+ *   cacheable) serves subsequent requests.
  *
  * Caching policy:
  *   - 2xx (200-299): Always cached (successful responses)
@@ -106,6 +105,11 @@ function safeHeaders(response: NextResponse): Record<string, string> {
 
 // Module-level cache: survives across requests within a process.
 const cache = new Map<string, CachedResponse>();
+
+// In-flight handler executions keyed by the same cache key. Prevents two
+// concurrent requests with the same idempotency key from both running the
+// handler before either result has been cached.
+const inFlight = new Map<string, Promise<NextResponse>>();
 
 function ttlMs(): number {
     const val = parseInt(process.env.IDEMPOTENCY_TTL_MS ?? '86400000', 10);
@@ -226,36 +230,42 @@ export function withIdempotency(
             });
         }
 
-        const response = await handler(req);
-
-        if (shouldCacheResponse(response.status)) {
-            const clone = response.clone();
-            let body: unknown = null;
-            let isText = false;
-            try {
-                body = await clone.json();
-            } catch {
-                body = await clone.text();
-                isText = true;
-            }
-            if (cache.size >= maxEntries()) evictExpired();
-            cache.set(key, {
-                status: response.status,
-                body,
-                isText,
-                headers: safeHeaders(response),
-                storedAt: Date.now(),
-            });
-            enforceMaxSize();
+        // A duplicate request arrived while the original is still executing:
+        // await the shared promise and return a cloned response rather than
+        // running the handler a second time.
+        const pending = inFlight.get(key);
+        if (pending) {
+            const response = await pending;
+            return response.clone();
         }
 
-        return response;
+        const execution = (async (): Promise<NextResponse> => {
+            const response = await handler(req);
+
+            if (shouldCacheResponse(response.status)) {
+                const body = await response.clone().json().catch(() => null);
+                if (cache.size >= maxEntries()) evictExpired();
+                cache.set(key, { status: response.status, body, storedAt: Date.now() });
+                enforceMaxSize();
+            }
+
+            return response;
+        })();
+
+        inFlight.set(key, execution);
+
+        try {
+            return await execution;
+        } finally {
+            inFlight.delete(key);
+        }
     };
 }
 
-/** Exposed for testing — clears all cached entries. */
+/** Exposed for testing — clears all cached entries and in-flight executions. */
 export function clearIdempotencyCache(): void {
     cache.clear();
+    inFlight.clear();
 }
 
 /** Exposed for testing — returns the current number of cached entries. */

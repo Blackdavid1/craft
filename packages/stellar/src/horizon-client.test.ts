@@ -178,6 +178,14 @@ describe('HorizonClient – successful request', () => {
     expect(mockFetch).toHaveBeenCalledOnce();
   });
 
+  it('normalizes multiple trailing slashes in baseUrl', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(makeResponse(200, {}, {}));
+    const client = new HorizonClient({ baseUrl: `${BASE_URL}///`, _fetch: mockFetch });
+
+    await client.get('/ledgers');
+    expect(mockFetch.mock.calls[0][0]).toBe(`${BASE_URL}/ledgers`);
+  });
+
   it('records circuit success on HTTP 200', async () => {
     const mockFetch = vi.fn().mockResolvedValue(makeResponse(200, {}, {}));
     const client = new HorizonClient({ baseUrl: BASE_URL, _fetch: mockFetch });
