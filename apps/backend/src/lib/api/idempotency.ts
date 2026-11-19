@@ -9,6 +9,17 @@
  * Cache entries are scoped per authenticated user — keys from different users
  * never collide even if the raw key string is identical.
  *
+ * In-flight deduplication:
+ *   The cache is only populated after a handler finishes, so two simultaneous
+ *   requests carrying the same key would otherwise both execute the handler
+ *   (e.g. creating two checkouts). To prevent this, the first request to miss
+ *   the cache registers its handler promise in an in-flight map keyed by the
+ *   same (userId, key) pair. Any duplicate request that arrives while that
+ *   promise is pending awaits it and returns a cloned response instead of
+ *   invoking the handler again. The in-flight entry is removed in a `finally`
+ *   block once the handler settles, at which point the cached response (if
+ *   cacheable) serves subsequent requests.
+ *
  * Caching policy:
  *   - 2xx (200-299): Always cached (successful responses)
  *   - 4xx (400-499): Cached for permanent client errors (400, 401, 403, 404, 422, etc.)
@@ -54,6 +65,11 @@ interface CachedResponse {
 
 // Module-level cache: survives across requests within a process.
 const cache = new Map<string, CachedResponse>();
+
+// In-flight handler executions keyed by the same cache key. Prevents two
+// concurrent requests with the same idempotency key from both running the
+// handler before either result has been cached.
+const inFlight = new Map<string, Promise<NextResponse>>();
 
 function ttlMs(): number {
     const val = parseInt(process.env.IDEMPOTENCY_TTL_MS ?? '86400000', 10);
@@ -162,22 +178,42 @@ export function withIdempotency(
             });
         }
 
-        const response = await handler(req);
-
-        if (shouldCacheResponse(response.status)) {
-            const body = await response.clone().json().catch(() => null);
-            if (cache.size >= maxEntries()) evictExpired();
-            cache.set(key, { status: response.status, body, storedAt: Date.now() });
-            enforceMaxSize();
+        // A duplicate request arrived while the original is still executing:
+        // await the shared promise and return a cloned response rather than
+        // running the handler a second time.
+        const pending = inFlight.get(key);
+        if (pending) {
+            const response = await pending;
+            return response.clone();
         }
 
-        return response;
+        const execution = (async (): Promise<NextResponse> => {
+            const response = await handler(req);
+
+            if (shouldCacheResponse(response.status)) {
+                const body = await response.clone().json().catch(() => null);
+                if (cache.size >= maxEntries()) evictExpired();
+                cache.set(key, { status: response.status, body, storedAt: Date.now() });
+                enforceMaxSize();
+            }
+
+            return response;
+        })();
+
+        inFlight.set(key, execution);
+
+        try {
+            return await execution;
+        } finally {
+            inFlight.delete(key);
+        }
     };
 }
 
-/** Exposed for testing — clears all cached entries. */
+/** Exposed for testing — clears all cached entries and in-flight executions. */
 export function clearIdempotencyCache(): void {
     cache.clear();
+    inFlight.clear();
 }
 
 /** Exposed for testing — returns the current number of cached entries. */
