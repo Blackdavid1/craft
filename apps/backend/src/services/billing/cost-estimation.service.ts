@@ -123,24 +123,34 @@ function roundUpBillingHours(durationHours: number): number {
 
 export class CostEstimationService {
     /**
-     * Calculate cost for a specific usage and tier
+     * Calculate cost for a specific usage and tier.
+     *
+     * All resource usage inputs are normalized before costing: non-numeric,
+     * `NaN`, `Infinity` and negative values fall back to 0 so they cannot
+     * produce `NaN` totals.
      */
     calculateCost(usage: ResourceUsage, tier: PricingTier): CostBreakdown {
         const config = TIER_CONFIGS[tier];
 
-        const baseTierCost = config.baseMonthlyCost;
-        const cpuOverage = Math.max(0, usage.cpuCores - config.includedCpuCores);
-        const memoryOverage = Math.max(0, usage.memoryGB - config.includedMemoryGB);
+        const cpuCores = normalizeNumber(usage.cpuCores, 0);
+        const memoryGB = normalizeNumber(usage.memoryGB, 0);
+        const storageGB = normalizeNumber(usage.storageGB, 0);
+        const bandwidthGB = normalizeNumber(usage.bandwidthGB, 0);
+        const durationHours = normalizeNumber(usage.durationHours, 0);
 
-        const roundedDurationHours = roundUpBillingHours(usage.durationHours);
+        const baseTierCost = config.baseMonthlyCost;
+        const cpuOverage = Math.max(0, cpuCores - config.includedCpuCores);
+        const memoryOverage = Math.max(0, memoryGB - config.includedMemoryGB);
+
+        const roundedDurationHours = roundUpBillingHours(durationHours);
 
         const computeCost = (cpuOverage * OVERAGE_RATES.cpuPerHour * roundedDurationHours) +
                             (memoryOverage * OVERAGE_RATES.memoryPerHour * roundedDurationHours);
 
-        const storageOverage = Math.max(0, usage.storageGB - config.includedStorageGB);
+        const storageOverage = Math.max(0, storageGB - config.includedStorageGB);
         const storageCost = storageOverage * OVERAGE_RATES.storagePerMonth;
 
-        const bandwidthOverage = Math.max(0, usage.bandwidthGB - config.includedBandwidthGB);
+        const bandwidthOverage = Math.max(0, bandwidthGB - config.includedBandwidthGB);
         const networkCost = bandwidthOverage * OVERAGE_RATES.bandwidthPerGB;
 
         const totalCost = baseTierCost + computeCost + storageCost + networkCost;

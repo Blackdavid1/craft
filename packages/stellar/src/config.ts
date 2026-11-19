@@ -19,20 +19,35 @@ export const SOROBAN_RPC_URLS = {
 
 type Network = 'mainnet' | 'testnet';
 
-function resolveNetwork(): Network {
-  const raw = process.env.STELLAR_NETWORK ?? process.env.NEXT_PUBLIC_STELLAR_NETWORK;
+/**
+ * Parses a raw network identifier into a canonical `Network`.
+ *
+ * Shared by `resolveNetwork` and `resolveStellarNetworkConfig` so both
+ * resolvers behave identically:
+ * - Trims surrounding whitespace (e.g. `" mainnet "` → `mainnet`).
+ * - Normalises case (e.g. `"MAINNET"` → `mainnet`).
+ * - Logs a warning and defaults to `testnet` for unknown or missing values.
+ *
+ * @param raw - The raw network value (may be undefined).
+ * @returns The canonical network identifier.
+ */
+export function parseNetwork(raw: string | undefined): Network {
   if (raw === undefined) {
     return 'testnet';
   }
-  const trimmed = raw.trim();
-  if (trimmed === 'mainnet') {
+  const normalised = raw.trim().toLowerCase();
+  if (normalised === 'mainnet') {
     return 'mainnet';
   }
-  if (trimmed === 'testnet') {
+  if (normalised === 'testnet') {
     return 'testnet';
   }
   console.warn(`Unrecognized STELLAR_NETWORK value: "${raw}". Expected 'mainnet' or 'testnet'. Defaulting to 'testnet'.`);
   return 'testnet';
+}
+
+function resolveNetwork(): Network {
+  return parseNetwork(process.env.STELLAR_NETWORK ?? process.env.NEXT_PUBLIC_STELLAR_NETWORK);
 }
 
 export function getNetworkConfig(network?: Network): StellarNetworkConfig {
@@ -71,7 +86,7 @@ export function getNetworkConfig(network?: Network): StellarNetworkConfig {
  * ```
  */
 export function resolveStellarNetworkConfig(env: Record<string, string | undefined>): StellarNetworkConfig {
-  const network = (env.NEXT_PUBLIC_STELLAR_NETWORK === 'mainnet' ? 'mainnet' : 'testnet') as Network;
+  const network = parseNetwork(env.NEXT_PUBLIC_STELLAR_NETWORK);
   return {
     network,
     horizonUrl: env.NEXT_PUBLIC_HORIZON_URL || HORIZON_URLS[network],
