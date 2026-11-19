@@ -202,6 +202,30 @@ paths:
         - Deployments
       security:
         - bearerAuth: []
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          description: >
+            Maximum number of deployments to return. Must be an integer greater
+            than or equal to 1. Defaults to 20 when omitted; values above the
+            maximum of 100 are capped at 100. Non-numeric, zero, or negative
+            values return HTTP 400.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: direction
+          in: query
+          required: false
+          description: >
+            Pagination direction. Must be either `next` or `prev`. Defaults to
+            `next` when omitted. Any other value returns HTTP 400.
+          schema:
+            type: string
+            enum: [next, prev]
+            default: next
       responses:
         '200':
           description: List of deployments
@@ -211,6 +235,12 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Deployment'
+        '400':
+          description: Invalid `limit` or `direction` query parameter.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '401':
           description: Unauthorized
           content:

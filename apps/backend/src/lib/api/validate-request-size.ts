@@ -21,21 +21,42 @@ export interface SizeLimit {
 }
 
 /**
- * Check if a request body size exceeds the limit
- * Returns the response size in bytes, or null if limit exceeded
+ * Result of checking a request's Content-Length header.
+ *
+ * - `{ ok: true, size }`: the header is present, valid, and within the limit.
+ * - `{ ok: false, reason: 'missing' }`: no Content-Length header was provided.
+ * - `{ ok: false, reason: 'invalid' }`: the header is not a valid non-negative
+ *   integer (e.g. non-numeric or negative).
+ * - `{ ok: false, reason: 'too_large' }`: the declared size exceeds `maxBytes`.
+ */
+export type RequestSizeCheckResult =
+    | { ok: true; size: number }
+    | { ok: false; reason: 'missing' | 'invalid' | 'too_large' };
+
+/**
+ * Check a request's Content-Length header against a size limit.
+ *
+ * Distinguishes a missing header from an invalid header and from an
+ * oversized body, so callers never mistake a missing header for success.
+ * See {@link RequestSizeCheckResult} for the possible outcomes.
  */
 export function checkRequestSize(
     contentLength: string | null,
     maxBytes: number,
-): number | null {
-    if (!contentLength) return null;
+): RequestSizeCheckResult {
+    if (!contentLength) return { ok: false, reason: 'missing' };
 
     const size = parseInt(contentLength, 10);
-    if (isNaN(size) || size > maxBytes) {
-        return null;
+    // Negative lengths indicate malformed or malicious requests.
+    if (isNaN(size) || size < 0) {
+        return { ok: false, reason: 'invalid' };
     }
 
-    return size;
+    if (size > maxBytes) {
+        return { ok: false, reason: 'too_large' };
+    }
+
+    return { ok: true, size };
 }
 
 /**
@@ -70,7 +91,8 @@ export function validateContentLength(
     }
 
     const size = parseInt(contentLength, 10);
-    if (isNaN(size)) {
+    // Negative lengths indicate malformed or malicious requests.
+    if (isNaN(size) || size < 0) {
         return { valid: false, message: 'Invalid Content-Length header' };
     }
 
