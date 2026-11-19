@@ -79,9 +79,20 @@ export async function unsubscribeAll(): Promise<void> {
 }
 
 /**
+ * Deployment statuses that are still in progress (i.e. not terminal).
+ * A deployment that reached a terminal state (`completed` or `failed`)
+ * during the drain window must not be overwritten.
+ */
+const IN_PROGRESS_STATUSES = ['pending', 'queued', 'building', 'deploying'] as const;
+
+/**
  * Force-fail any in-flight deployments that did not complete during the
  * drain window.  Each stuck deployment is transitioned to `failed` with
  * `error_message` set to `Shutdown: drain timeout`.
+ *
+ * The update is restricted to non-terminal statuses so a deployment that
+ * finished (e.g. `completed`) between the drain timeout and this update is
+ * not overwritten with `failed`.
  */
 export async function forceFailStuckDeployments(): Promise<void> {
     if (inFlight.size === 0) return;
@@ -98,7 +109,8 @@ export async function forceFailStuckDeployments(): Promise<void> {
                     error_message: 'Shutdown: drain timeout',
                     updated_at: new Date().toISOString(),
                 })
-                .eq('id', id),
+                .eq('id', id)
+                .in('status', [...IN_PROGRESS_STATUSES]),
         ),
     );
 
