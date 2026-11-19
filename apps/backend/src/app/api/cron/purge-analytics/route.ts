@@ -10,15 +10,21 @@ import { getRetentionPolicyWindows, readRetentionDays, validateRetentionWindows 
  * ANALYTICS_RETENTION_DAYS (default: 90). This prevents the table from
  * growing unbounded and degrading query performance over time.
  *
- * Set ANALYTICS_RETENTION_DAYS=0 to disable deletion entirely.
+ * Set ANALYTICS_RETENTION_DAYS=0 to disable deletion entirely: the route
+ * returns a no-op 200 response ({ deleted: 0, skipped: true }) without
+ * validating retention windows or deleting any rows.
  *
  * Scheduled daily via vercel.json. Protected by CRON_SECRET.
  */
 async function handleAnalyticsPurge(req: NextRequest) {
     const retentionDays = readRetentionDays('analyticsPurge');
-    validateRetentionWindows(getRetentionPolicyWindows());
+
+    if (retentionDays === 0) {
+        return NextResponse.json({ deleted: 0, skipped: true });
+    }
 
     try {
+        validateRetentionWindows(getRetentionPolicyWindows());
         const deleted = await analyticsService.applyRetentionPolicy(retentionDays);
         return NextResponse.json({ deleted });
     } catch (error: any) {
