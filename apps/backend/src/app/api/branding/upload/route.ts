@@ -23,6 +23,10 @@ import {
  * On success returns { url } — the public URL to the uploaded asset.
  * On validation failure returns { error, code } with 422 status.
  * On storage error returns { error } with 500 status.
+ *
+ * NOTE: Storage is not yet wired, so a validated upload currently returns
+ * 501 { error, code: 'STORAGE_NOT_CONFIGURED' } instead of a URL.
+ * Tracking issue: https://github.com/craft/issues/1404
  */
 export const POST = withAuth(async (req: NextRequest, { supabase, user }) => {
     try {
@@ -111,13 +115,14 @@ export const POST = withAuth(async (req: NextRequest, { supabase, user }) => {
             );
         }
 
-        // TODO: upload buffer to Supabase Storage / S3 and return the real URL
+        // TODO(#1404): upload buffer to Supabase Storage / S3 and return the real URL
+        // https://github.com/craft/issues/1404
         return NextResponse.json(
             {
-                url: null,
-                message: 'File validated successfully. Storage not yet wired.',
+                error: 'Storage not configured',
+                code: 'STORAGE_NOT_CONFIGURED',
             },
-            { status: 200 },
+            { status: 501 },
         );
     } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : 'Upload failed';
