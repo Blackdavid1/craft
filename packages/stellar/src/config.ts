@@ -50,13 +50,42 @@ function resolveNetwork(): Network {
   return parseNetwork(process.env.STELLAR_NETWORK ?? process.env.NEXT_PUBLIC_STELLAR_NETWORK);
 }
 
+/**
+ * Returns a validated override URL, or `undefined` when the override is unset
+ * or rejected. Overrides must use `https://` to avoid downgrading transport
+ * security; non-https values are ignored with a warning so callers fall back
+ * to the hard-coded default.
+ */
+function resolveHttpsOverride(raw: string | undefined, name: string): string | undefined {
+  if (!raw) {
+    return undefined;
+  }
+  if (!raw.startsWith('https://')) {
+    console.warn(`Ignoring ${name} override: "${raw}" must use https://. Falling back to default.`);
+    return undefined;
+  }
+  return raw;
+}
+
+/**
+ * Returns the Stellar network configuration for the given (or resolved)
+ * network.
+ *
+ * Precedence: `NEXT_PUBLIC_HORIZON_URL` and `NEXT_PUBLIC_SOROBAN_RPC_URL`
+ * overrides take precedence over the hard-coded defaults when set to a valid
+ * `https://` URL. Unset or non-https overrides fall back to the defaults.
+ */
 export function getNetworkConfig(network?: Network): StellarNetworkConfig {
   const net = network ?? resolveNetwork();
   return {
     network: net,
-    horizonUrl: HORIZON_URLS[net],
+    horizonUrl:
+      resolveHttpsOverride(process.env.NEXT_PUBLIC_HORIZON_URL, 'NEXT_PUBLIC_HORIZON_URL') ??
+      HORIZON_URLS[net],
     networkPassphrase: NETWORK_PASSPHRASES[net],
-    sorobanRpcUrl: SOROBAN_RPC_URLS[net],
+    sorobanRpcUrl:
+      resolveHttpsOverride(process.env.NEXT_PUBLIC_SOROBAN_RPC_URL, 'NEXT_PUBLIC_SOROBAN_RPC_URL') ??
+      SOROBAN_RPC_URLS[net],
   };
 }
 
@@ -226,22 +255,16 @@ export function createHorizonFailover(cfg: HorizonFailoverConfig): HorizonFailov
   // Map<url, unhealthySince (ms timestamp)>
   const unhealthyUntil = new Map<string, number>();
 
-  function isHealthy(url: string): boolean {
-    const until = unhealthyUntil.get(url);
-    if (until === undefined) return true;
-    if (Date.now() >= until) {
-      unhealthyUntil.delete(url);
-      return true;
-    }
-    return false;
-  }
-
   return {
     selectEndpoint(): string {
+      const now = Date.now();
       for (const url of endpoints) {
-        if (isHealthy(url)) return url;
+        const until = unhealthyUntil.get(url);
+        if (until === undefined || now >= until) {
+          return url;
+        }
       }
-      // All unhealthy — return primary as last resort
+      // All endpoints unhealthy — fall back to primary as last resort.
       return endpoints[0];
     },
     markUnhealthy(url: string): void {
@@ -252,12 +275,3 @@ export function createHorizonFailover(cfg: HorizonFailoverConfig): HorizonFailov
     },
   };
 }
-
-/**
- * Default per-network failover instances built from the standard endpoint lists.
- * Override by calling `createHorizonFailover` with custom endpoint arrays.
- */
-export const HORIZON_FAILOVER_ENDPOINTS: Record<Network, string[]> = {
-  mainnet: [HORIZON_URLS.mainnet],
-  testnet: [HORIZON_URLS.testnet],
-};

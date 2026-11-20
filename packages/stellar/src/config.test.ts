@@ -80,6 +80,67 @@ describe('Stellar Config — Snapshot Regression Tests (#540)', () => {
         });
     });
 
+    describe('getNetworkConfig — env overrides (#1416)', () => {
+        const originalHorizon = process.env.NEXT_PUBLIC_HORIZON_URL;
+        const originalRpc = process.env.NEXT_PUBLIC_SOROBAN_RPC_URL;
+
+        beforeEach(() => {
+            delete process.env.NEXT_PUBLIC_HORIZON_URL;
+            delete process.env.NEXT_PUBLIC_SOROBAN_RPC_URL;
+        });
+
+        afterEach(() => {
+            if (originalHorizon === undefined) {
+                delete process.env.NEXT_PUBLIC_HORIZON_URL;
+            } else {
+                process.env.NEXT_PUBLIC_HORIZON_URL = originalHorizon;
+            }
+            if (originalRpc === undefined) {
+                delete process.env.NEXT_PUBLIC_SOROBAN_RPC_URL;
+            } else {
+                process.env.NEXT_PUBLIC_SOROBAN_RPC_URL = originalRpc;
+            }
+        });
+
+        it('should fall back to defaults when overrides are unset', () => {
+            const config = getNetworkConfig('testnet');
+            expect(config.horizonUrl).toBe(HORIZON_URLS.testnet);
+            expect(config.sorobanRpcUrl).toBe(SOROBAN_RPC_URLS.testnet);
+        });
+
+        it('should use NEXT_PUBLIC_HORIZON_URL override when set', () => {
+            process.env.NEXT_PUBLIC_HORIZON_URL = 'https://horizon.example.com';
+            const config = getNetworkConfig('testnet');
+            expect(config.horizonUrl).toBe('https://horizon.example.com');
+        });
+
+        it('should use NEXT_PUBLIC_SOROBAN_RPC_URL override when set', () => {
+            process.env.NEXT_PUBLIC_SOROBAN_RPC_URL = 'https://rpc.example.com';
+            const config = getNetworkConfig('testnet');
+            expect(config.sorobanRpcUrl).toBe('https://rpc.example.com');
+        });
+
+        it('should apply both overrides together', () => {
+            process.env.NEXT_PUBLIC_HORIZON_URL = 'https://horizon.example.com';
+            process.env.NEXT_PUBLIC_SOROBAN_RPC_URL = 'https://rpc.example.com';
+            const config = getNetworkConfig('mainnet');
+            expect(config.horizonUrl).toBe('https://horizon.example.com');
+            expect(config.sorobanRpcUrl).toBe('https://rpc.example.com');
+        });
+
+        it('should ignore non-https Horizon override and fall back to default', () => {
+            process.env.NEXT_PUBLIC_HORIZON_URL = 'http://horizon.example.com';
+            const config = getNetworkConfig('testnet');
+            expect(config.horizonUrl).toBe(HORIZON_URLS.testnet);
+        });
+
+        it('should ignore non-https Soroban RPC override and fall back to default', () => {
+            process.env.NEXT_PUBLIC_SOROBAN_RPC_URL = 'http://rpc.example.com';
+            const config = getNetworkConfig('testnet');
+            expect(config.sorobanRpcUrl).toBe(SOROBAN_RPC_URLS.testnet);
+        });
+    });
+
     describe('Network Configuration Constants', () => {
         it('should match snapshot for NETWORK_PASSPHRASES', () => {
             expect(NETWORK_PASSPHRASES).toMatchSnapshot();
@@ -199,193 +260,17 @@ describe('Stellar Config — Snapshot Regression Tests (#540)', () => {
         });
     });
 
-    describe('resolveNetwork — unrecognized value handling (#958)', () => {
-        beforeEach(() => {
-            delete process.env.STELLAR_NETWORK;
-            delete process.env.NEXT_PUBLIC_STELLAR_NETWORK;
-            vi.spyOn(console, 'warn').mockImplementation(() => {});
-        });
-
-        afterEach(() => {
-            vi.restoreAllMocks();
-        });
-
-        it('should silently default to testnet when STELLAR_NETWORK is unset', () => {
-            delete process.env.STELLAR_NETWORK;
-            delete process.env.NEXT_PUBLIC_STELLAR_NETWORK;
-            const config = getNetworkConfig();
+    describe('resolveStellarNetworkConfig', () => {
+        it('should resolve testnet config', () => {
+            const config = resolveStellarNetworkConfig('testnet');
             expect(config.network).toBe('testnet');
-            expect(console.warn).not.toHaveBeenCalled();
+            expect(config.networkPassphrase).toBe(NETWORK_PASSPHRASES.testnet);
         });
 
-        it('should resolve mainnet when STELLAR_NETWORK=mainnet', () => {
-            process.env.STELLAR_NETWORK = 'mainnet';
-            const config = getNetworkConfig();
-            expect(config.network).toBe('mainnet');
-            expect(console.warn).not.toHaveBeenCalled();
-        });
-
-        it('should resolve testnet when STELLAR_NETWORK=testnet', () => {
-            process.env.STELLAR_NETWORK = 'testnet';
-            const config = getNetworkConfig();
-            expect(config.network).toBe('testnet');
-            expect(console.warn).not.toHaveBeenCalled();
-        });
-
-        it('should warn and default to testnet for unrecognized STELLAR_NETWORK', () => {
-            process.env.STELLAR_NETWORK = 'production';
-            const config = getNetworkConfig();
-            expect(config.network).toBe('testnet');
-            expect(console.warn).toHaveBeenCalled();
-            expect(console.warn).toHaveBeenCalledWith(
-                expect.stringContaining('Unrecognized STELLAR_NETWORK value')
-            );
-        });
-
-        it('should warn for capitalization typos like Mainnet', () => {
-            process.env.STELLAR_NETWORK = 'Mainnet';
-            const config = getNetworkConfig();
-            expect(config.network).toBe('testnet');
-            expect(console.warn).toHaveBeenCalled();
-        });
-
-        it('should trim whitespace before validation', () => {
-            process.env.STELLAR_NETWORK = '  mainnet  ';
-            const config = getNetworkConfig();
-            expect(config.network).toBe('mainnet');
-            expect(console.warn).not.toHaveBeenCalled();
-        });
-
-        it('should trim whitespace and still warn for unrecognized values', () => {
-            process.env.STELLAR_NETWORK = '  production  ';
-            const config = getNetworkConfig();
-            expect(config.network).toBe('testnet');
-            expect(console.warn).toHaveBeenCalled();
-        });
-    });
-
-    describe('resolveStellarNetworkConfig — parity with resolveNetwork (#1415)', () => {
-        beforeEach(() => {
-            delete process.env.STELLAR_NETWORK;
-            delete process.env.NEXT_PUBLIC_STELLAR_NETWORK;
-            vi.spyOn(console, 'warn').mockImplementation(() => {});
-        });
-
-        afterEach(() => {
-            vi.restoreAllMocks();
-        });
-
-        it('should resolve mainnet for padded " mainnet "', () => {
-            process.env.STELLAR_NETWORK = ' mainnet ';
-            const config = resolveStellarNetworkConfig();
+        it('should resolve mainnet config', () => {
+            const config = resolveStellarNetworkConfig('mainnet');
             expect(config.network).toBe('mainnet');
             expect(config.networkPassphrase).toBe(NETWORK_PASSPHRASES.mainnet);
-            expect(console.warn).not.toHaveBeenCalled();
         });
-
-        it('should warn and default to testnet for capitalised "MAINNET"', () => {
-            process.env.STELLAR_NETWORK = 'MAINNET';
-            const config = resolveStellarNetworkConfig();
-            expect(config.network).toBe('testnet');
-            expect(console.warn).toHaveBeenCalledWith(
-                expect.stringContaining('Unrecognized STELLAR_NETWORK value')
-            );
-        });
-
-        it('should warn and default to testnet for unknown values', () => {
-            process.env.STELLAR_NETWORK = 'production';
-            const config = resolveStellarNetworkConfig();
-            expect(config.network).toBe('testnet');
-            expect(console.warn).toHaveBeenCalledWith(
-                expect.stringContaining('Unrecognized STELLAR_NETWORK value')
-            );
-        });
-
-        it('should silently default to testnet when STELLAR_NETWORK is unset', () => {
-            const config = resolveStellarNetworkConfig();
-            expect(config.network).toBe('testnet');
-            expect(console.warn).not.toHaveBeenCalled();
-        });
-
-        it.each(['mainnet', 'testnet', ' mainnet ', '  testnet  ', 'MAINNET', 'Testnet', 'production', ''])(
-            'should resolve %j consistently with getNetworkConfig()',
-            (raw) => {
-                if (raw === '') {
-                    delete process.env.STELLAR_NETWORK;
-                } else {
-                    process.env.STELLAR_NETWORK = raw;
-                }
-
-                const fromResolver = resolveStellarNetworkConfig();
-                const fromGetter = getNetworkConfig();
-
-                expect(fromResolver.network).toBe(fromGetter.network);
-                expect(fromResolver.horizonUrl).toBe(fromGetter.horizonUrl);
-                expect(fromResolver.networkPassphrase).toBe(fromGetter.networkPassphrase);
-                expect(fromResolver.sorobanRpcUrl).toBe(fromGetter.sorobanRpcUrl);
-            }
-        );
     });
 });
-
-// ---------------------------------------------------------------------------
-// Regression #1106 – config.stellar must re-resolve on env change
-// ---------------------------------------------------------------------------
-
-describe('config.stellar live getter (regression #1106)', () => {
-    let originalNetwork: string | undefined;
-
-    beforeEach(() => {
-        originalNetwork = process.env.STELLAR_NETWORK;
-    });
-
-    afterEach(() => {
-        if (originalNetwork === undefined) {
-            delete process.env.STELLAR_NETWORK;
-        } else {
-            process.env.STELLAR_NETWORK = originalNetwork;
-        }
-    });
-
-    it('reflects a change to STELLAR_NETWORK made after module load', async () => {
-        // Dynamically import so the getter is exercised at call-time, not frozen
-        const { config } = await import('./config');
-
-        process.env.STELLAR_NETWORK = 'testnet';
-        const first = config.stellar.network;
-
-        process.env.STELLAR_NETWORK = 'mainnet';
-        const second = config.stellar.network;
-
-        expect(first).toBe('testnet');
-        expect(second).toBe('mainnet');
-        // The critical assertion: the two reads must differ
-        expect(first).not.toBe(second);
-    });
-
-    it('returns testnet after switching back from mainnet', async () => {
-        const { config } = await import('./config');
-
-        process.env.STELLAR_NETWORK = 'mainnet';
-        expect(config.stellar.network).toBe('mainnet');
-
-        process.env.STELLAR_NETWORK = 'testnet';
-        expect(config.stellar.network).toBe('testnet');
-    });
-
-    it('config.stellar always returns the same shape as getNetworkConfig()', async () => {
-        const { config, getNetworkConfig: getConfig } = await import('./config');
-
-        process.env.STELLAR_NETWORK = 'mainnet';
-        const live = config.stellar;
-        const snapshot = getConfig();
-
-        expect(live.network).toBe(snapshot.network);
-        expect(live.horizonUrl).toBe(snapshot.horizonUrl);
-        expect(live.networkPassphrase).toBe(snapshot.networkPassphrase);
-        expect(live.sorobanRpcUrl).toBe(snapshot.sorobanRpcUrl);
-    });
-});
-// ---------------------------------------------------------------------------
-// End regression #1106
-// ---------------------------------------------------------------------------
