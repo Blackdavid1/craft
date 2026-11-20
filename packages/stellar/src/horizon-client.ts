@@ -3,7 +3,8 @@
  *
  * Wraps raw Horizon HTTP calls with:
  * - Adaptive backoff: respects X-RateLimit-Remaining / X-RateLimit-Reset
- * - Circuit breaker: opens after 5 failures in 30 s, half-opens after 60 s
+ * - Circuit breaker: opens after 5 failures within the failure window (default 30 s),
+ *   half-opens after 60 s
  * - Retry budget: maximum 3 retries per request regardless of rate-limit headroom
  * - Logging: each retry is logged to the analytics service
  */
@@ -114,6 +115,7 @@ export class HorizonClient {
       name: 'horizon',
       failureThreshold: options.circuitOpenThreshold ?? 5,
       resetTimeoutMs: options.circuitRecoveryMs ?? 60_000,
+      failureWindowMs: options.circuitWindowMs ?? 30_000,
     });
   }
 
