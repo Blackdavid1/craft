@@ -20,21 +20,31 @@ export function MobileDrawer({ isOpen, onClose, onSignOut, children }: MobileDra
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  if (!isOpen) return null;
-
   const handleSignOut = () => {
     onSignOut();
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 md:hidden" role="dialog" aria-modal="true">
+    <div
+      className={`fixed inset-0 z-50 md:hidden transition-opacity duration-200 ${
+        isOpen ? 'opacity-100' : 'pointer-events-none opacity-0 invisible'
+      }`}
+      role="dialog"
+      aria-modal="true"
+      aria-hidden={!isOpen}
+      inert={!isOpen}
+    >
       <div
         className="absolute inset-0 bg-black/50"
         onClick={onClose}
         aria-hidden="true"
       />
-      <nav className="absolute left-0 top-0 h-full w-72 max-w-[80%] bg-white shadow-xl flex flex-col">
+      <nav
+        className={`absolute left-0 top-0 h-full w-72 max-w-[80%] bg-white shadow-xl flex flex-col transition-transform duration-200 ${
+          isOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
         <div className="flex items-center justify-between p-4 border-b">
           <span className="text-lg font-semibold">Menu</span>
           <button
