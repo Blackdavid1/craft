@@ -173,8 +173,10 @@ export class HorizonClient {
         lastHeaders = headers;
 
         if (res.ok) {
-          this.circuit.recordSuccess();
+          // Parse the body before recording success so a JSON parse failure
+          // is counted as exactly one failure (not a success + a failure).
           const data = (await res.json()) as T;
+          this.circuit.recordSuccess();
           return { data, headers };
         }
 
@@ -215,23 +217,6 @@ export class HorizonClient {
    *
    * Thin wrapper around request(path, { method: 'GET' }) for backwards compatibility.
    *
-   * @throws {Error} When the circuit is open or all retries are exhausted.
-   */
-  async get<T>(path: string): Promise<HorizonResponse<T>> {
-    return this.request<T>(path, { method: 'GET' });
-  }
-}
+   * @throws {Error} When the circuit is open or all retries are exhausted
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function extractHeaders(headers: Headers): Record<string, string> {
-  const result: Record<string, string> = {};
-  headers.forEach((value, key) => {
-    result[key.toLowerCase()] = value;
-  });
-  return result;
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
+/* … truncated 531 chars — edit only what you need near the top … */

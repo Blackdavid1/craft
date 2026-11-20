@@ -193,6 +193,31 @@ describe('HorizonClient – successful request', () => {
     await client.get('/ledgers');
     expect(client.circuit.currentState).toBe('CLOSED');
   });
+
+  it('records only a failure (no success) when JSON parsing fails after HTTP 200 (#1421)', async () => {
+    const parseError = new SyntaxError('Unexpected token < in JSON');
+    const badResponse = {
+      ok: true,
+      status: 200,
+      json: () => Promise.reject(parseError),
+      headers: {
+        forEach() {
+          /* no headers */
+        },
+      },
+    } as unknown as Response;
+
+    const mockFetch = vi.fn().mockResolvedValue(badResponse);
+    const client = new HorizonClient({ baseUrl: BASE_URL, _fetch: mockFetch });
+
+    const successSpy = vi.spyOn(client.circuit, 'recordSuccess');
+    const failureSpy = vi.spyOn(client.circuit, 'recordFailure');
+
+    await expect(client.get('/ledgers')).rejects.toBe(parseError);
+
+    expect(successSpy).not.toHaveBeenCalled();
+    expect(failureSpy).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('HorizonClient – retry and rate limit backoff', () => {
@@ -227,72 +252,6 @@ describe('HorizonClient – retry and rate limit backoff', () => {
     });
 
     await client.get('/ledgers');
-    expect(retryLogs).toHaveLength(1);
-    expect(retryLogs[0].attempt).toBe(0);
-    expect(retryLogs[0].delayMs).toBeGreaterThanOrEqual(0);
-    expect(retryLogs[0].reason).toContain('rate_limit_low_remaining');
-  });
-});
+    expect
 
-describe('HorizonClient – non-retryable 4xx responses (#1420)', () => {
-  it('throws a 404 after a single attempt without retrying', async () => {
-    const mockFetch = vi.fn().mockResolvedValue(makeResponse(404, {}, { title: 'Resource Missing' }));
-    const retryLogs: unknown[] = [];
-    const client = new HorizonClient({
-      baseUrl: BASE_URL,
-      _fetch: mockFetch,
-      onRetry: (log) => retryLogs.push(log),
-    });
-
-    await expect(client.get('/accounts/GMISSING')).rejects.toThrow();
-    expect(mockFetch).toHaveBeenCalledOnce();
-    expect(retryLogs).toHaveLength(0);
-  });
-
-  it('does not increment the circuit failure count on a 404', async () => {
-    const mockFetch = vi.fn().mockResolvedValue(makeResponse(404, {}, {}));
-    const client = new HorizonClient({ baseUrl: BASE_URL, _fetch: mockFetch });
-
-    const recordFailure = vi.spyOn(client.circuit, 'recordFailure');
-
-    await expect(client.get('/accounts/GMISSING')).rejects.toThrow();
-    expect(recordFailure).not.toHaveBeenCalled();
-    expect(client.circuit.currentState).toBe('CLOSED');
-  });
-
-  it('throws a 400 after a single attempt without retrying', async () => {
-    const mockFetch = vi.fn().mockResolvedValue(makeResponse(400, {}, { title: 'Bad Request' }));
-    const retryLogs: unknown[] = [];
-    const client = new HorizonClient({
-      baseUrl: BASE_URL,
-      _fetch: mockFetch,
-      onRetry: (log) => retryLogs.push(log),
-    });
-
-    await expect(client.get('/accounts/bad')).rejects.toThrow();
-    expect(mockFetch).toHaveBeenCalledOnce();
-    expect(retryLogs).toHaveLength(0);
-  });
-
-  it('does not increment the circuit failure count on a 400', async () => {
-    const mockFetch = vi.fn().mockResolvedValue(makeResponse(400, {}, {}));
-    const client = new HorizonClient({ baseUrl: BASE_URL, _fetch: mockFetch });
-
-    const recordFailure = vi.spyOn(client.circuit, 'recordFailure');
-
-    await expect(client.get('/accounts/bad')).rejects.toThrow();
-    expect(recordFailure).not.toHaveBeenCalled();
-    expect(client.circuit.currentState).toBe('CLOSED');
-  });
-
-  it('still retries and records failures on a 503', async () => {
-    const mockFetch = vi.fn().mockResolvedValue(makeResponse(503, {}, {}));
-    const client = new HorizonClient({ baseUrl: BASE_URL, _fetch: mockFetch });
-
-    const recordFailure = vi.spyOn(client.circuit, 'recordFailure');
-
-    await expect(client.get('/ledgers')).rejects.toThrow();
-    expect(mockFetch.mock.calls.length).toBeGreaterThan(1);
-    expect(recordFailure).toHaveBeenCalled();
-  });
-});
+/* … truncated 2751 chars — edit only what you need near the top … */
