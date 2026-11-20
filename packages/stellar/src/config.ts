@@ -68,6 +68,18 @@ function resolveHttpsOverride(raw: string | undefined, name: string): string | u
 }
 
 /**
+ * Resolves the effective network passphrase for a network.
+ *
+ * Honours the `NEXT_PUBLIC_NETWORK_PASSPHRASE` override when set, otherwise
+ * falls back to the hard-coded public/testnet constants. Shared by
+ * `getNetworkPassphrase` and `validateNetworkPassphrase` so both agree on the
+ * configured value.
+ */
+function resolveNetworkPassphrase(net: Network): string {
+  return process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE || NETWORK_PASSPHRASES[net];
+}
+
+/**
  * Returns the Stellar network configuration for the given (or resolved)
  * network.
  *
@@ -82,7 +94,7 @@ export function getNetworkConfig(network?: Network): StellarNetworkConfig {
     horizonUrl:
       resolveHttpsOverride(process.env.NEXT_PUBLIC_HORIZON_URL, 'NEXT_PUBLIC_HORIZON_URL') ??
       HORIZON_URLS[net],
-    networkPassphrase: NETWORK_PASSPHRASES[net],
+    networkPassphrase: resolveNetworkPassphrase(net),
     sorobanRpcUrl:
       resolveHttpsOverride(process.env.NEXT_PUBLIC_SOROBAN_RPC_URL, 'NEXT_PUBLIC_SOROBAN_RPC_URL') ??
       SOROBAN_RPC_URLS[net],
@@ -128,6 +140,9 @@ export function resolveStellarNetworkConfig(env: Record<string, string | undefin
  * Validates that a transaction's network passphrase matches the target network.
  * Prevents cross-network transaction replay attacks.
  *
+ * Honours the `NEXT_PUBLIC_NETWORK_PASSPHRASE` override: when set, only that
+ * configured value is accepted (strict matching).
+ *
  * @param transactionPassphrase - The passphrase used to sign the transaction
  * @param targetNetwork - The target network ('mainnet' or 'testnet')
  * @throws Error if passphrase doesn't match the target network
@@ -142,7 +157,7 @@ export function validateNetworkPassphrase(
   targetNetwork?: Network
 ): void {
   const net = targetNetwork ?? resolveNetwork();
-  const expectedPassphrase = NETWORK_PASSPHRASES[net];
+  const expectedPassphrase = resolveNetworkPassphrase(net);
 
   if (transactionPassphrase !== expectedPassphrase) {
     throw new NetworkMismatchError(transactionPassphrase, expectedPassphrase, net);
@@ -162,10 +177,11 @@ export function getSorobanRpcUrl(network?: Network): string {
 
 /**
  * Get the network passphrase for the current or specified network.
+ * Respects the NEXT_PUBLIC_NETWORK_PASSPHRASE env var override.
  */
 export function getNetworkPassphrase(network?: Network): string {
   const net = network ?? resolveNetwork();
-  return NETWORK_PASSPHRASES[net];
+  return resolveNetworkPassphrase(net);
 }
 
 /**
@@ -226,52 +242,6 @@ export default config;
  * ```
  */
 export interface HorizonFailoverConfig {
-  /** Ordered list of Horizon URLs. First entry is the primary. */
-  endpoints: string[];
-  /** Milliseconds before an unhealthy endpoint is retried. Default: 30 000. */
-  recoveryMs?: number;
-}
+  /** Ordered list of Horizon URLs. First entry is the prim
 
-export interface HorizonFailover {
-  /** Returns the best available endpoint (prefers healthy, falls back to primary). */
-  selectEndpoint(): string;
-  /** Mark an endpoint as unhealthy after a failed request. */
-  markUnhealthy(url: string): void;
-  /** Mark an endpoint as healthy (called after a successful request). */
-  markHealthy(url: string): void;
-}
-
-/**
- * Creates a stateful Horizon failover manager.
- *
- * Endpoint health is tracked in memory. The primary endpoint (index 0) is
- * preferred; secondary endpoints are used only when the primary is unhealthy.
- * Recovery is time-based: an endpoint becomes eligible again after `recoveryMs`.
- */
-export function createHorizonFailover(cfg: HorizonFailoverConfig): HorizonFailover {
-  const { endpoints, recoveryMs = 30_000 } = cfg;
-  if (endpoints.length === 0) throw new Error('At least one Horizon endpoint is required');
-
-  // Map<url, unhealthySince (ms timestamp)>
-  const unhealthyUntil = new Map<string, number>();
-
-  return {
-    selectEndpoint(): string {
-      const now = Date.now();
-      for (const url of endpoints) {
-        const until = unhealthyUntil.get(url);
-        if (until === undefined || now >= until) {
-          return url;
-        }
-      }
-      // All endpoints unhealthy — fall back to primary as last resort.
-      return endpoints[0];
-    },
-    markUnhealthy(url: string): void {
-      unhealthyUntil.set(url, Date.now() + recoveryMs);
-    },
-    markHealthy(url: string): void {
-      unhealthyUntil.delete(url);
-    },
-  };
-}
+/* … truncated 1658 chars — edit only what you need near the top … */
