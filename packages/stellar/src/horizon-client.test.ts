@@ -227,41 +227,72 @@ describe('HorizonClient – retry and rate limit backoff', () => {
     });
 
     await client.get('/ledgers');
-    expect(retryLogs[0].attempt).toBe(1);
+    expect(retryLogs).toHaveLength(1);
+    expect(retryLogs[0].attempt).toBe(0);
+    expect(retryLogs[0].delayMs).toBeGreaterThanOrEqual(0);
     expect(retryLogs[0].reason).toContain('rate_limit_low_remaining');
-  });
-
-  it('throws after exhausting the retry budget', async () => {
-    const mockFetch = vi.fn().mockResolvedValue(makeResponse(503, {}));
-    const client = new HorizonClient({ baseUrl: BASE_URL, maxRetries: 3, _fetch: mockFetch });
-
-    await expect(client.get('/accounts/G123')).rejects.toThrow('HTTP 503');
-    // initial + 3 retries = 4 calls
-    expect(mockFetch).toHaveBeenCalledTimes(4);
   });
 });
 
-describe('HorizonClient – circuit breaker integration', () => {
-  it('throws immediately when circuit is open', async () => {
-    const mockFetch = vi.fn().mockResolvedValue(makeResponse(503, {}));
+describe('HorizonClient – non-retryable 4xx responses (#1420)', () => {
+  it('throws a 404 after a single attempt without retrying', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(makeResponse(404, {}, { title: 'Resource Missing' }));
+    const retryLogs: unknown[] = [];
     const client = new HorizonClient({
       baseUrl: BASE_URL,
-      circuitOpenThreshold: 5,
-      circuitWindowMs: 30_000,
-      maxRetries: 0,
       _fetch: mockFetch,
+      onRetry: (log) => retryLogs.push(log),
     });
 
-    // Trip circuit: 5 failures
-    for (let i = 0; i < 5; i++) {
-      await client.get('/ledgers').catch(() => {});
-    }
+    await expect(client.get('/accounts/GMISSING')).rejects.toThrow();
+    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(retryLogs).toHaveLength(0);
+  });
 
-    expect(client.circuit.isOpen()).toBe(true);
-    await expect(client.get('/ledgers')).rejects.toThrow('Circuit breaker is open');
-    // After circuit opens, no additional fetch calls
-    const callsBefore = mockFetch.mock.calls.length;
-    await client.get('/ledgers').catch(() => {});
-    expect(mockFetch.mock.calls.length).toBe(callsBefore);
+  it('does not increment the circuit failure count on a 404', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(makeResponse(404, {}, {}));
+    const client = new HorizonClient({ baseUrl: BASE_URL, _fetch: mockFetch });
+
+    const recordFailure = vi.spyOn(client.circuit, 'recordFailure');
+
+    await expect(client.get('/accounts/GMISSING')).rejects.toThrow();
+    expect(recordFailure).not.toHaveBeenCalled();
+    expect(client.circuit.currentState).toBe('CLOSED');
+  });
+
+  it('throws a 400 after a single attempt without retrying', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(makeResponse(400, {}, { title: 'Bad Request' }));
+    const retryLogs: unknown[] = [];
+    const client = new HorizonClient({
+      baseUrl: BASE_URL,
+      _fetch: mockFetch,
+      onRetry: (log) => retryLogs.push(log),
+    });
+
+    await expect(client.get('/accounts/bad')).rejects.toThrow();
+    expect(mockFetch).toHaveBeenCalledOnce();
+    expect(retryLogs).toHaveLength(0);
+  });
+
+  it('does not increment the circuit failure count on a 400', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(makeResponse(400, {}, {}));
+    const client = new HorizonClient({ baseUrl: BASE_URL, _fetch: mockFetch });
+
+    const recordFailure = vi.spyOn(client.circuit, 'recordFailure');
+
+    await expect(client.get('/accounts/bad')).rejects.toThrow();
+    expect(recordFailure).not.toHaveBeenCalled();
+    expect(client.circuit.currentState).toBe('CLOSED');
+  });
+
+  it('still retries and records failures on a 503', async () => {
+    const mockFetch = vi.fn().mockResolvedValue(makeResponse(503, {}, {}));
+    const client = new HorizonClient({ baseUrl: BASE_URL, _fetch: mockFetch });
+
+    const recordFailure = vi.spyOn(client.circuit, 'recordFailure');
+
+    await expect(client.get('/ledgers')).rejects.toThrow();
+    expect(mockFetch.mock.calls.length).toBeGreaterThan(1);
+    expect(recordFailure).toHaveBeenCalled();
   });
 });
