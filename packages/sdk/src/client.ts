@@ -10,6 +10,20 @@ export type { DeploymentStatusType } from '@craft/types';
 export type SubscriptionTier = 'free' | 'pro' | 'enterprise';
 
 /**
+ * Known Stripe subscription statuses.
+ * @see https://stripe.com/docs/api/subscriptions/object#subscription_object-status
+ */
+export type SubscriptionStatusType =
+  | 'active'
+  | 'canceled'
+  | 'incomplete'
+  | 'incomplete_expired'
+  | 'past_due'
+  | 'paused'
+  | 'trialing'
+  | 'unpaid';
+
+/**
  * Configuration options for CraftClient.
  * @property baseUrl - The base URL of the CRAFT API (e.g., https://craft.app)
  * @property accessToken - Optional JWT access token for authenticated requests
@@ -91,8 +105,8 @@ export interface CheckoutResponse {
 
 export interface SubscriptionStatus {
   subscriptionId: string;
-  status: string;
-  tier: string;
+  status: SubscriptionStatusType;
+  tier: SubscriptionTier;
   currentPeriodEnd: string;
   cancelAtPeriodEnd: boolean;
 }
@@ -248,8 +262,123 @@ export class CraftClient {
         if (errorBody.message && typeof errorBody.message === 'string') {
           message = errorBody.message;
         } else if (errorBody.error && typeof errorBody.error === 'string') {
-          // Rate-limit middleware responses use `error` rather than `message`.
           message = errorBody.error;
         }
         if (errorBody.code && typeof errorBody.code === 'string') {
-          code 
+          code = errorBody.code;
+        }
+      } catch {
+        // Non-JSON error body; fall back to raw text.
+      }
+
+      if (res.status === 429 && attempt < this.maxRetries) {
+        const retryAfterMs = resolveRetryAfterMs(res, errorBody);
+        if (retryAfterMs <= this.maxRetryDelayMs) {
+          await sleep(retryAfterMs);
+          continue;
+        }
+      }
+
+      if (res.status === 429) {
+        throw new CraftApiError(
+          res.status,
+          message || 'Rate limit exceeded',
+          code ?? 'RATE_LIMITED',
+          resolveRetryAfterMs(res, errorBody),
+        );
+      }
+
+      throw new CraftApiError(res.status, message || `Request failed with status ${res.status}`, code);
+    }
+  }
+
+  /**
+   * Signs up a new user.
+   * @param data - Sign-up credentials and profile info
+   * @returns Auth response with user and session tokens
+   */
+  async signUp(data: SignUpRequest): Promise<AuthResponse> {
+    return this.request<AuthResponse>('POST', '/api/auth/signup', data);
+  }
+
+  /**
+   * Signs in an existing user.
+   * @param data - Sign-in credentials
+   * @returns Auth response with user and session tokens
+   */
+  async signIn(data: SignInRequest): Promise<AuthResponse> {
+    return this.request<AuthResponse>('POST', '/api/auth/signin', data);
+  }
+
+  /**
+   * Signs out the current user.
+   */
+  async signOut(): Promise<void> {
+    return this.request<void>('POST', '/api/auth/signout');
+  }
+
+  /**
+   * Fetches the current user's profile.
+   * @returns User profile
+   */
+  async getProfile(): Promise<UserProfile> {
+    return this.request<UserProfile>('GET', '/api/auth/profile');
+  }
+
+  /**
+   * Lists available templates.
+   * @param options - Optional category/search filters
+   * @returns Array of templates
+   */
+  async listTemplates(options?: TemplateListOptions): Promise<TemplateListResponse> {
+    const params = new URLSearchParams();
+    if (options?.category) params.set('category', options.category);
+    if (options?.search) params.set('search', options.search);
+    const query = params.toString();
+    return this.request<TemplateListResponse>('GET', `/api/templates${query ? `?${query}` : ''}`);
+  }
+
+  /**
+   * Fetches a single template by ID.
+   * @param id - Template ID
+   * @returns Template
+   */
+  async getTemplate(id: string): Promise<Template> {
+    return this.request<Template>('GET', `/api/templates/${encodeURIComponent(id)}`);
+  }
+
+  /**
+   * Creates a Stripe checkout session for a subscription.
+   * @param data - Checkout request details
+   * @returns Checkout session ID and URL
+   */
+  async createCheckoutSession(data: CheckoutRequest): Promise<CheckoutResponse> {
+    return this.request<CheckoutResponse>('POST', '/api/payments/checkout', data);
+  }
+
+  /**
+   * Fetches the current subscription status.
+   * @returns Subscription status
+   */
+  async getSubscriptionStatus(): Promise<SubscriptionStatus> {
+    return this.request<SubscriptionStatus>('GET', '/api/payments/subscription');
+  }
+
+  /**
+   * Fetches deployment analytics.
+   * @param deploymentId - Deployment ID
+   * @returns Analytics data and summary
+   */
+  async getDeploymentAnalytics(deploymentId: string): Promise<DeploymentAnalytics> {
+    return this.request<DeploymentAnalytics>('GET', `/api/deployments/${encodeURIComponent(deploymentId)}/analytics`);
+  }
+
+  /**
+   * Fetches deployment health.
+   * @param deploymentId - Deployment ID
+   * @returns Health status
+   */
+  async getDeploymentHealth(deploymentId: string): Promise<DeploymentHealth> {
+    return this.request<DeploymentHealth>('GET', `/api/deployments/${encodeURIComponent(deploymentId)}/health`);
+  }
+}

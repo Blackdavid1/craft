@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { CraftClient } from './client';
 import { CraftApiError } from './errors';
-import type { UserProfile } from './types';
+import type { UserProfile, SubscriptionStatus, SubscriptionTier } from './types';
 
 describe('CraftClient.request', () => {
   const baseUrl = 'https://api.example.com';
@@ -156,5 +156,29 @@ describe('CraftClient.getUser', () => {
 
     // Guard against the old Date typing: .getTime() must not exist on the value.
     expect((profile as UserProfile).createdAt).not.toHaveProperty('getTime');
+  });
+});
+
+describe('SubscriptionStatus typing', () => {
+  it('narrows tier to SubscriptionTier and status to the Stripe status union', () => {
+    // Type-level assertions: these assignments only compile if the fields are
+    // narrowed to the exported unions rather than the wide `string` type.
+    const tier: SubscriptionTier = 'pro';
+    const status: SubscriptionStatus['status'] = 'active';
+
+    const subscription: SubscriptionStatus = {
+      tier,
+      status,
+    };
+
+    expect(subscription.tier).toBe('pro');
+    expect(subscription.status).toBe('active');
+
+    // Exhaustiveness: every SubscriptionTier value is assignable to the field.
+    const tiers: SubscriptionTier[] = ['free', 'pro', 'enterprise'];
+    for (const t of tiers) {
+      const s: SubscriptionStatus = { tier: t, status: 'active' };
+      expect(s.tier).toBe(t);
+    }
   });
 });

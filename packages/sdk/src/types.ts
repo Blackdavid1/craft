@@ -21,3 +21,28 @@ export interface UserProfile {
   updatedAt?: string;
   [key: string]: unknown;
 }
+
+/**
+ * Known subscription tiers exposed by the SDK.
+ */
+export type SubscriptionTier = 'free' | 'pro' | 'team' | 'enterprise';
+
+/**
+ * Known Stripe subscription statuses.
+ * @see https://stripe.com/docs/api/subscriptions/object#subscription_object-status
+ */
+export type SubscriptionStatusValue =
+  | 'active'
+  | 'canceled'
+  | 'incomplete'
+  | 'incomplete_expired'
+  | 'past_due'
+  | 'paused'
+  | 'trialing'
+  | 'unpaid';
+
+export interface SubscriptionStatus {
+  tier: SubscriptionTier;
+  status: SubscriptionStatusValue;
+  [key: string]: unknown;
+}
