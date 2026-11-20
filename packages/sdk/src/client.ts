@@ -44,7 +44,12 @@ export interface UserProfile {
   email: string;
   fullName: string;
   subscriptionTier: SubscriptionTier;
-  createdAt: Date;
+  /**
+   * Account creation timestamp as an ISO 8601 string (e.g. `2024-01-15T10:30:00.000Z`).
+   * This is the raw value from the parsed JSON response — not a `Date` instance.
+   * Use `new Date(profile.createdAt)` if you need a `Date`.
+   */
+  createdAt: string;
   githubConnected: boolean;
   githubUsername: string | null;
 }
@@ -247,39 +252,4 @@ export class CraftClient {
           message = errorBody.error;
         }
         if (errorBody.code && typeof errorBody.code === 'string') {
-          code = errorBody.code;
-        }
-      } catch {
-        // text is not JSON; use raw text as message
-      }
-
-      if (res.status === 429) {
-        const retryAfterMs = resolveRetryAfterMs(res, errorBody);
-        if (attempt < this.maxRetries && retryAfterMs <= this.maxRetryDelayMs) {
-          await sleep(retryAfterMs);
-          continue;
-        }
-        throw new CraftApiError(429, message || 'Rate limit exceeded', 'RATE_LIMITED', retryAfterMs);
-      }
-
-      throw new CraftApiError(res.status, message, code);
-    }
-  }
-
-  /**
-   * Lists available templates.
-   *
-   * GET /api/templates returns a plain array; `category` and `search` are
-   * forwarded as query parameters. The route does not paginate, so no
-   * `limit`/`offset` are sent.
-   * @param options - Optional category and search filters
-   * @returns The array of templates returned by the API
-   */
-  async listTemplates(options?: TemplateListOptions): Promise<TemplateListResponse> {
-    const params = new URLSearchParams();
-    if (options?.category) params.set('category', options.category);
-    if (options?.search) params.set('search', options.search);
-    const query = params.toString();
-    return this.request<TemplateListResponse>('GET', `/api/templates${query ? `?${query}` : ''}`);
-  }
-}
+          code 

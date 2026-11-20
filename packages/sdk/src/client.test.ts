@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { CraftClient } from './client';
 import { CraftApiError } from './errors';
+import type { UserProfile } from './types';
 
 describe('CraftClient.request', () => {
   const baseUrl = 'https://api.example.com';
@@ -117,5 +118,43 @@ describe('CraftClient.listTemplates', () => {
     expect(url.pathname).toBe('/api/templates');
     expect(url.searchParams.has('limit')).toBe(false);
     expect(url.searchParams.has('offset')).toBe(false);
+  });
+});
+
+describe('CraftClient.getUser', () => {
+  const baseUrl = 'https://api.example.com';
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('returns createdAt as an ISO 8601 string, not a Date', async () => {
+    const createdAt = '2024-01-01T00:00:00.000Z';
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify({ id: 'usr_1', createdAt }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const client = new CraftClient({ baseUrl, apiKey: 'test-key' });
+    const profile = await client.getUser();
+
+    // Type-level assertion: createdAt must be assignable to string.
+    const createdAtValue: string = profile.createdAt;
+    expect(typeof createdAtValue).toBe('string');
+    expect(profile.createdAt).toBe(createdAt);
+    expect(profile.createdAt).not.toBeInstanceOf(Date);
+    expect(new Date(profile.createdAt).toISOString()).toBe(createdAt);
+
+    // Guard against the old Date typing: .getTime() must not exist on the value.
+    expect((profile as UserProfile).createdAt).not.toHaveProperty('getTime');
   });
 });
