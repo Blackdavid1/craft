@@ -66,3 +66,56 @@ describe('CraftClient.request', () => {
     await expect(client.request('/bad')).rejects.toBeInstanceOf(CraftApiError);
   });
 });
+
+describe('CraftClient.listTemplates', () => {
+  const baseUrl = 'https://api.example.com';
+  let fetchMock: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('returns the plain array shape produced by GET /api/templates', async () => {
+    const templates = [
+      { id: 'tpl_1', name: 'Welcome', createdAt: '2024-01-01T00:00:00.000Z' },
+      { id: 'tpl_2', name: 'Goodbye', createdAt: '2024-01-02T00:00:00.000Z' },
+    ];
+
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify(templates), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const client = new CraftClient({ baseUrl, apiKey: 'test-key' });
+    const result = await client.listTemplates();
+
+    expect(Array.isArray(result)).toBe(true);
+    expect(result).toEqual(templates);
+  });
+
+  it('does not send limit/offset query parameters the route ignores', async () => {
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const client = new CraftClient({ baseUrl, apiKey: 'test-key' });
+    await client.listTemplates();
+
+    const [requestedUrl] = fetchMock.mock.calls[0] as [string];
+    const url = new URL(requestedUrl);
+    expect(url.pathname).toBe('/api/templates');
+    expect(url.searchParams.has('limit')).toBe(false);
+    expect(url.searchParams.has('offset')).toBe(false);
+  });
+});

@@ -60,18 +60,17 @@ export interface Template {
   thumbnailUrl?: string;
 }
 
-export interface TemplateListResponse {
-  templates: Template[];
-  total: number;
-  limit: number;
-  offset: number;
-}
+/**
+ * Response shape of GET /api/templates.
+ *
+ * The route returns a plain array from `templateService.listTemplates`; it does
+ * not paginate, so there is no `total`/`limit`/`offset` envelope.
+ */
+export type TemplateListResponse = Template[];
 
 export interface TemplateListOptions {
   category?: string;
   search?: string;
-  limit?: number;
-  offset?: number;
 }
 
 export interface CheckoutRequest {
@@ -254,22 +253,33 @@ export class CraftClient {
         // text is not JSON; use raw text as message
       }
 
-      if (res.status !== 429) {
-        throw new CraftApiError(res.status, message, code);
+      if (res.status === 429) {
+        const retryAfterMs = resolveRetryAfterMs(res, errorBody);
+        if (attempt < this.maxRetries && retryAfterMs <= this.maxRetryDelayMs) {
+          await sleep(retryAfterMs);
+          continue;
+        }
+        throw new CraftApiError(429, message || 'Rate limit exceeded', 'RATE_LIMITED', retryAfterMs);
       }
 
-      const retryAfterMs = resolveRetryAfterMs(res, errorBody);
-      if (attempt >= this.maxRetries) {
-        throw new CraftApiError(
-          429,
-          `Rate limit exceeded; gave up after ${attempt} ${attempt === 1 ? 'retry' : 'retries'} (server asked to retry after ${retryAfterMs}ms): ${message}`,
-          code ?? 'RATE_LIMITED',
-          retryAfterMs,
-        );
-      }
-      if (retryAfterMs > this.maxRetryDelayMs) {
-        throw new CraftApiError(
-          429,
-          `Rate limit exceeded; server asked to retry after ${retryAfterMs}ms, which exceeds maxRetryDelayMs (${this.maxRetryDelayMs}ms)
+      throw new CraftApiError(res.status, message, code);
+    }
+  }
 
-/* … truncated 6022 chars — edit only what you need near the top … */
+  /**
+   * Lists available templates.
+   *
+   * GET /api/templates returns a plain array; `category` and `search` are
+   * forwarded as query parameters. The route does not paginate, so no
+   * `limit`/`offset` are sent.
+   * @param options - Optional category and search filters
+   * @returns The array of templates returned by the API
+   */
+  async listTemplates(options?: TemplateListOptions): Promise<TemplateListResponse> {
+    const params = new URLSearchParams();
+    if (options?.category) params.set('category', options.category);
+    if (options?.search) params.set('search', options.search);
+    const query = params.toString();
+    return this.request<TemplateListResponse>('GET', `/api/templates${query ? `?${query}` : ''}`);
+  }
+}
