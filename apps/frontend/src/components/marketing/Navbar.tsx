@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 
 interface NavLink {
   label: string;
@@ -28,12 +29,12 @@ export function Navbar({
     <nav className="fixed top-0 w-full z-50 bg-slate-50/70 backdrop-blur-xl border-b border-slate-200/20 shadow-sm">
       <div className="flex justify-between items-center max-w-7xl mx-auto px-6 h-16">
         <div className="flex items-center gap-8">
-          <a 
+          <Link 
             href="/" 
             className="text-xl font-bold tracking-tighter text-blue-900 font-headline"
           >
             CRAFT
-          </a>
+          </Link>
           
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center gap-6">
