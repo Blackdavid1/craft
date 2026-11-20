@@ -54,9 +54,13 @@ export interface CircuitBreakerConfig {
 
 /** Thrown when a call is rejected because the circuit is OPEN. */
 export class CircuitOpenError extends Error {
+  /** Remaining wait time (ms) before the circuit may allow a probe. */
+  readonly retryAfterMs: number;
+
   constructor(name: string, retryAfterMs: number) {
     super(`Circuit "${name}" is OPEN — retry after ${retryAfterMs}ms`);
     this.name = 'CircuitOpenError';
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
@@ -95,8 +99,7 @@ export class CircuitBreaker {
     this.transitionIfDue();
 
     if (this.state === 'OPEN') {
-      const retryAfterMs = this.openedAt! + this.resetTimeoutMs - this.now();
-      throw new CircuitOpenError(this.name, Math.max(0, retryAfterMs));
+      throw new CircuitOpenError(this.name, this.retryAfterMs());
     }
 
     try {
@@ -130,6 +133,17 @@ export class CircuitBreaker {
   }
 
   /**
+   * Get the remaining wait time (ms) before the circuit may allow a probe.
+   * Returns 0 when the circuit is not OPEN.
+   *
+   * @returns Remaining retry-after time in milliseconds
+   */
+  getRetryAfterMs(): number {
+    this.transitionIfDue();
+    return this.retryAfterMs();
+  }
+
+  /**
    * Record a successful call (manual state API).
    * Resets failure count and transitions to CLOSED.
    */
@@ -153,6 +167,11 @@ export class CircuitBreaker {
   }
 
   // ── Private ──────────────────────────────────────────────────────────────
+
+  private retryAfterMs(): number {
+    if (this.state !== 'OPEN' || this.openedAt === null) return 0;
+    return Math.max(0, this.openedAt + this.resetTimeoutMs - this.now());
+  }
 
   private transitionIfDue(): void {
     if (this.state === 'OPEN' && this.openedAt !== null) {

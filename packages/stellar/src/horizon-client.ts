@@ -13,7 +13,7 @@
  * counted as circuit failures.
  */
 
-import { CircuitBreaker } from './circuit-breaker';
+import { CircuitBreaker, CircuitOpenError } from './circuit-breaker';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -146,11 +146,16 @@ export class HorizonClient {
    *
    * @param path - URL path relative to baseUrl
    * @param options - Request options (method, body, headers)
-   * @throws {Error} When the circuit is open or all retries are exhausted.
+   * @throws {CircuitOpenError} When the circuit is open. The error exposes the
+   *   remaining wait time via `retryAfterMs` (if available).
+   * @throws {Error} When all retries are exhausted or a non-retryable error occurs.
    */
   async request<T>(path: string, options?: RequestOptions): Promise<HorizonResponse<T>> {
     if (this.circuit.isOpen()) {
-      throw new Error(`Circuit breaker is open. Horizon requests are suspended.`);
+      throw new CircuitOpenError(
+        'Circuit breaker is open. Horizon requests are suspended.',
+        this.circuit.getRemainingOpenMs?.(),
+      );
     }
 
     const url = `${this.baseUrl}${path}`;
@@ -215,8 +220,6 @@ export class HorizonClient {
   /**
    * Performs an HTTP GET with adaptive retry and circuit breaker protection.
    *
-   * Thin wrapper around request(path, { method: 'GET' }) for backwards compatibility.
-   *
-   * @throws {Error} When the circuit is open or all retries are exhausted
+   * Thin wra
 
-/* … truncated 531 chars — edit only what you need near the top … */
+/* … truncated 224 chars — edit only what you need near the top … */
