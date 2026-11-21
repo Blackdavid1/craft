@@ -31,7 +31,18 @@ Comprehensive documentation for the CRAFT platform.
 
 ### Installation
 
-```bash
+```
+
+## Performance tuning
+
+The following environment variables can be used to tune backend performance. They are optional and have the listed defaults.
+
+- `HEALTH_CHECK_BUDGET_MS` (default: `60000`) – Maximum time budget in milliseconds for a single health‑check cron run.
+- `HEALTH_CHECK_CONCURRENCY` – Number of concurrent health checks performed per batch. (default defined in code)
+- `WORKER_CONCURRENCY` – Number of concurrent worker processes. (default defined in code)
+- `LOG_BATCH_SIZE` – Number of log entries to batch before writing to the database. (default defined in code)
+- `LOG_FLUSH_INTERVAL_MS` – Interval in milliseconds to flush log batches. (default defined in code)
+bash
 # Clone the repository
 git clone <repository-url>
 
