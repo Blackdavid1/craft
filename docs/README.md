@@ -57,7 +57,17 @@ GITHUB_APP_INSTALLATION_ID=12345678
 GITHUB_API_BASE_URL=https://api.github.com
 STRIPE_SECRET_KEY=your_stripe_key
 STRIPE_WEBHOOK_SECRET=your_webhook_secret
+
+# Cron & Admin
+# Secret used to authenticate cron route calls. Required in production.
+# Generate a random secret with: openssl rand -hex 32
+CRON_SECRET=your_cron_secret
+# Comma-separated list of admin user IDs (UUIDs) granted the admin role.
+# Example: ADMIN_USER_IDS=11111111-1111-1111-1111-111111111111,22222222-2222-2222-2222-222222222222
+ADMIN_USER_IDS=
 ```
+
+See [RBAC & Admin Middleware](./rbac-admin-middleware.md) for details on admin role resolution.
 
 ---
 
