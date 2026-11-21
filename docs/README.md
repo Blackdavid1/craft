@@ -66,6 +66,14 @@ GITHUB_APP_ID=123456
 GITHUB_APP_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----"
 GITHUB_APP_INSTALLATION_ID=12345678
 GITHUB_API_BASE_URL=https://api.github.com
+
+# GitHub Branch Protection and Token Encryption
+# GITHUB_DEPLOYMENT_BRANCH: The branch to which deployments are pushed (default: main)
+# GITHUB_PROTECTED_BRANCH: The branch protected by required status checks (default: main)
+# GITHUB_REQUIRED_STATUS_CHECKS: Comma‑separated list of required status check contexts (e.g., "craft/deployment,ci/build")
+# GITHUB_TOKEN: GitHub token with `repo:status` scope. Keep secret.
+# GITHUB_TOKEN_ENCRYPTION_KEY: 32‑byte base64 key used to encrypt the token at rest.
+#   Generate with: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"`
 STRIPE_SECRET_KEY=your_stripe_key
 STRIPE_WEBHOOK_SECRET=your_webhook_secret
 
